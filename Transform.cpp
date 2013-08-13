@@ -19,17 +19,36 @@ namespace {
 
   struct UPCRDecls {
     FunctionDecl * upcr_notify;
+    FunctionDecl * upcr_wait;
+    FunctionDecl * upcr_barrier;
     explicit UPCRDecls(ASTContext& Context) {
+      // upcr_notify
+      {
+	QualType argTypes[] = { Context.IntTy, Context.IntTy };
+	upcr_notify = CreateFunction(Context, "upcr_notify", Context.VoidTy, argTypes, 2);
+      }
+      // upcr_wait
+      {
+	QualType argTypes[] = { Context.IntTy, Context.IntTy };
+	upcr_wait = CreateFunction(Context, "upcr_wait", Context.VoidTy, argTypes, 2);
+      }
+      // upcr_barrier
+      {
+	QualType argTypes[] = { Context.IntTy, Context.IntTy };
+	upcr_barrier = CreateFunction(Context, "upcr_barrier", Context.VoidTy, argTypes, 2);
+      }
+    }
+    FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
       DeclContext *DC = Context.getTranslationUnitDecl();
-      QualType argTypes[] = { Context.IntTy, Context.IntTy };
-      QualType Ty = Context.getFunctionType(Context.VoidTy, argTypes, 2, FunctionProtoType::ExtProtoInfo());
-      upcr_notify = FunctionDecl::Create(Context, DC, SourceLocation(), SourceLocation(), DeclarationName(&Context.Idents.get("upcr_notify")), Ty, Context.getTrivialTypeSourceInfo(Ty));
-      llvm::SmallVector<ParmVarDecl *, 2> Params;
-      Params.push_back(ParmVarDecl::Create(Context, upcr_notify, SourceLocation(), SourceLocation(), 0, Context.IntTy, 0, SC_None, SC_None, 0));
-      Params.push_back(ParmVarDecl::Create(Context, upcr_notify, SourceLocation(), SourceLocation(), 0, Context.IntTy, 0, SC_None, SC_None, 0));
-      Params[0]->setScopeInfo(0, 0);
-      Params[0]->setScopeInfo(0, 1);
-      upcr_notify->setParams(Params);
+      QualType Ty = Context.getFunctionType(RetType, argTypes, numArgs, FunctionProtoType::ExtProtoInfo());
+      FunctionDecl *Result = FunctionDecl::Create(Context, DC, SourceLocation(), SourceLocation(), DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty));
+      llvm::SmallVector<ParmVarDecl *, 4> Params;
+      for(int i = 0; i < numArgs; ++i) {
+	Params.push_back(ParmVarDecl::Create(Context, Result, SourceLocation(), SourceLocation(), 0, argTypes[i], 0, SC_None, SC_None, 0));
+	Params[i]->setScopeInfo(0, i);
+      }
+      Result->setParams(Params);
+      return Result;
     }
   };
 
@@ -62,6 +81,38 @@ namespace {
       Stmt *result = BuildUPCRCall(Decls->upcr_notify, args).get();
       return SemaRef.Owned(result);
     }
+    StmtResult TransformUPCWaitStmt(UPCWaitStmt *S) {
+      Expr *ID = S->getIdValue();
+      std::vector<Expr*> args;
+      if(ID) {
+	args.push_back(TransformExpr(ID).get());
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
+      } else {
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
+      }
+      Stmt *result = BuildUPCRCall(Decls->upcr_wait, args).get();
+      return SemaRef.Owned(result);
+    }
+    StmtResult TransformUPCBarrierStmt(UPCBarrierStmt *S) {
+      Expr *ID = S->getIdValue();
+      std::vector<Expr*> args;
+      if(ID) {
+	args.push_back(TransformExpr(ID).get());
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
+      } else {
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
+	args.push_back(IntegerLiteral::Create(
+	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
+      }
+      Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
+      return SemaRef.Owned(result);
+    }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
       return TreeTransform::TransformDecl(Loc, D);
     }
@@ -77,7 +128,7 @@ namespace {
 				    FD->isConstexpr());
 	if(FD->doesThisDeclarationHaveABody()) {
 	  SemaRef.ActOnStartOfFunctionDef(0, result);
-	  Sema::ContextRAII savedContext(SemaRef, result);
+	  Sema::SynthesizedFunctionScope Scope(SemaRef, result);
 	  SemaRef.ActOnFinishFunctionBody(result, TransformStmt(FD->getBody()).get());
 	}
 	return result;
@@ -102,8 +153,10 @@ namespace {
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
       TranslationUnitDecl *result = SemaRef.Context.getTranslationUnitDecl();
       Scope CurScope(0, Scope::DeclScope, SemaRef.getDiagnostics());
+      SemaRef.setCurScope(&CurScope);
       SemaRef.PushDeclContext(&CurScope, result);
       CopyDeclContext(D, result);
+      SemaRef.setCurScope(0);
       return result;
     }
     UPCRDecls *Decls;
