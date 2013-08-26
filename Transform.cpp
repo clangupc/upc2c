@@ -22,8 +22,14 @@ namespace {
     FunctionDecl * upcr_wait;
     FunctionDecl * upcr_barrier;
     FunctionDecl * UPCR_BEGIN_FUNCTION;
+    FunctionDecl * UPCRT_STARTUP_PSHALLOC;
     QualType upcr_shared_ptr_t;
+    QualType upcr_startup_pshalloc_t;
     explicit UPCRDecls(ASTContext& Context) {
+      // types
+      upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t");
+      upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc");
+
       // upcr_notify
       {
 	QualType argTypes[] = { Context.IntTy, Context.IntTy };
@@ -43,18 +49,11 @@ namespace {
       {
 	UPCR_BEGIN_FUNCTION = CreateFunction(Context, "UPCR_BEGIN_FUNCTION", Context.VoidTy, NULL, 0);
       }
-
-      // upcr_shared_ptr_t
       {
-	DeclContext *DC = Context.getTranslationUnitDecl();
-	RecordDecl *Result = RecordDecl::Create(Context, TTK_Struct, DC,
-						SourceLocation(), SourceLocation(),
-						&Context.Idents.get("upcr_shared_ptr_t_"));
-	Result->startDefinition();
-	Result->completeDefinition();
-	TypedefDecl *Typedef = TypedefDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_shared_ptr_t"), Context.getTrivialTypeSourceInfo(Context.getRecordType(Result)));
-	upcr_shared_ptr_t = Context.getTypedefType(Typedef);
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
+	UPCRT_STARTUP_PSHALLOC = CreateFunction(Context, "UPCRT_STARTUP_PSHALLOC", upcr_startup_pshalloc_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+
     }
     FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
       SourceManager& SourceMgr = Context.getSourceManager();
@@ -69,6 +68,16 @@ namespace {
       }
       Result->setParams(Params);
       return Result;
+    }
+    QualType CreateTypedefType(ASTContext& Context, StringRef name) {
+      DeclContext *DC = Context.getTranslationUnitDecl();
+      RecordDecl *Result = RecordDecl::Create(Context, TTK_Struct, DC,
+					      SourceLocation(), SourceLocation(),
+					      0);
+      Result->startDefinition();
+      Result->completeDefinition();
+      TypedefDecl *Typedef = TypedefDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get(name), Context.getTrivialTypeSourceInfo(Context.getRecordType(Result)));
+      return Context.getTypedefType(Typedef);
     }
   };
 
@@ -157,6 +166,7 @@ namespace {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(),
 					    VD->getLocation(), VD->getIdentifier(),
 					    Decls->upcr_shared_ptr_t, SemaRef.Context.getTrivialTypeSourceInfo(Decls->upcr_shared_ptr_t), VD->getStorageClass(), VD->getStorageClassAsWritten());
+	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  return result;
 	} else {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
@@ -196,10 +206,12 @@ namespace {
     }
     // The shared variables that need to be initialized
     // all must have type upcr_shared_ptr_t
+    // first = upcr_shared_ptr_t, second = original declaration
     // This must be called at the end of the transformation
     // after all variables with static storage duration
     // have been processed
-    std::vector<VarDecl*> SharedGlobals;
+    typedef std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobalsType;
+    std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobals;
     FunctionDecl* GetInitialization() {
       // FIXME: randomize (?) the name
       FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_ALLOC_test", SemaRef.Context.VoidTy, 0, 0);
@@ -213,6 +225,41 @@ namespace {
 	{
 	  std::vector<Expr*> args;
 	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	}
+	for(SharedGlobalsType::const_iterator iter = SharedGlobals.begin(), end = SharedGlobals.end();
+	    iter != end; ++iter) {
+	  std::vector<Expr*> args;
+	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, Decls->upcr_shared_ptr_t, VK_LValue, SourceLocation()).get());
+	  int LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
+	  int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
+	  bool hasThread = false;
+	  QualType ElemTy = iter->second->getType().getCanonicalType();
+	  while(const ArrayType *AT = dyn_cast<ArrayType>(ElemTy.getTypePtr())) {
+	    if(const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+	      ArrayDimension *= CAT->getSize();
+	    } else if(const UPCThreadArrayType *TAT = dyn_cast<UPCThreadArrayType>(AT)) {
+	      if(TAT->getThread()) {
+		hasThread = true;
+	      }
+	      ArrayDimension *= TAT->getSize();
+	    } else {
+	      assert(!"Other array types should not syntax check");
+	    }
+	    ElemTy = AT->getElementType();
+	  }
+	  int ElementSize = SemaRef.Context.getTypeSize(ElemTy);
+	  if(LayoutQualifier == 0) {
+	    // FIXME:
+	  } else {
+	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, LayoutQualifier * ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
+	    args.push_back(IntegerLiteral::Create(SemaRef.Context, (ArrayDimension + LayoutQualifier - 1).udiv(llvm::APInt(SizeTypeSize, LayoutQualifier)), SemaRef.Context.getSizeType(), SourceLocation()));
+	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, hasThread), SemaRef.Context.getSizeType(), SourceLocation()));
+	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
+	    // FIXME: encode the correct mangled type
+	    args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
+	    Statements.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
+	  }
 	}
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
