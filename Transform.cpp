@@ -21,6 +21,8 @@ namespace {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
     FunctionDecl * upcr_barrier;
+    FunctionDecl * UPCR_BEGIN_FUNCTION;
+    QualType upcr_shared_ptr_t;
     explicit UPCRDecls(ASTContext& Context) {
       // upcr_notify
       {
@@ -37,11 +39,29 @@ namespace {
 	QualType argTypes[] = { Context.IntTy, Context.IntTy };
 	upcr_barrier = CreateFunction(Context, "upcr_barrier", Context.VoidTy, argTypes, 2);
       }
+      // UPCR_BEGIN_FUNCTION
+      {
+	UPCR_BEGIN_FUNCTION = CreateFunction(Context, "UPCR_BEGIN_FUNCTION", Context.VoidTy, NULL, 0);
+      }
+
+      // upcr_shared_ptr_t
+      {
+	DeclContext *DC = Context.getTranslationUnitDecl();
+	RecordDecl *Result = RecordDecl::Create(Context, TTK_Struct, DC,
+						SourceLocation(), SourceLocation(),
+						&Context.Idents.get("upcr_shared_ptr_t_"));
+	Result->startDefinition();
+	Result->completeDefinition();
+	TypedefDecl *Typedef = TypedefDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_shared_ptr_t"), Context.getTrivialTypeSourceInfo(Context.getRecordType(Result)));
+	upcr_shared_ptr_t = Context.getTypedefType(Typedef);
+      }
     }
     FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
+      SourceManager& SourceMgr = Context.getSourceManager();
+      SourceLocation FakeLocation = SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
       DeclContext *DC = Context.getTranslationUnitDecl();
       QualType Ty = Context.getFunctionType(RetType, argTypes, numArgs, FunctionProtoType::ExtProtoInfo());
-      FunctionDecl *Result = FunctionDecl::Create(Context, DC, SourceLocation(), SourceLocation(), DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty));
+      FunctionDecl *Result = FunctionDecl::Create(Context, DC, FakeLocation, FakeLocation, DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty));
       llvm::SmallVector<ParmVarDecl *, 4> Params;
       for(int i = 0; i < numArgs; ++i) {
 	Params.push_back(ParmVarDecl::Create(Context, Result, SourceLocation(), SourceLocation(), 0, argTypes[i], 0, SC_None, SC_None, 0));
@@ -133,13 +153,20 @@ namespace {
 	}
 	return result;
       } else if(VarDecl *VD = dyn_cast<VarDecl>(D)) {
-	VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
-			       TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
-			       VD->getStorageClass(), VD->getStorageClassAsWritten());
-	if(Expr *Init = VD->getInit()) {
-	  result->setInit(TransformExpr(Init).get());
+	if(VD->getType().getQualifiers().hasShared()) {
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(),
+					    VD->getLocation(), VD->getIdentifier(),
+					    Decls->upcr_shared_ptr_t, SemaRef.Context.getTrivialTypeSourceInfo(Decls->upcr_shared_ptr_t), VD->getStorageClass(), VD->getStorageClassAsWritten());
+	  return result;
+	} else {
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
+					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
+					    VD->getStorageClass(), VD->getStorageClassAsWritten());
+	  if(Expr *Init = VD->getInit()) {
+	    result->setInit(TransformExpr(Init).get());
+	  }
+	  return result;
 	}
-	return result;
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
 	return RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
 				  RD->getLocStart(), RD->getLocation(),
@@ -156,6 +183,7 @@ namespace {
       SemaRef.setCurScope(&CurScope);
       SemaRef.PushDeclContext(&CurScope, result);
       CopyDeclContext(D, result);
+      result->addDecl(GetInitialization());
       SemaRef.setCurScope(0);
       return result;
     }
@@ -165,6 +193,31 @@ namespace {
           end = Src->decls_end(); iter != end; ++iter) {
 	Dst->addDecl(TransformDeclaration(*iter, Dst));
       }
+    }
+    // The shared variables that need to be initialized
+    // all must have type upcr_shared_ptr_t
+    // This must be called at the end of the transformation
+    // after all variables with static storage duration
+    // have been processed
+    std::vector<VarDecl*> SharedGlobals;
+    FunctionDecl* GetInitialization() {
+      // FIXME: randomize (?) the name
+      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_ALLOC_test", SemaRef.Context.VoidTy, 0, 0);
+      SemaRef.ActOnStartOfFunctionDef(0, Result);
+      Sema::SynthesizedFunctionScope Scope(SemaRef, Result);
+      StmtResult Body;
+      {
+	Sema::CompoundScopeRAII BodyScope(SemaRef);
+	SmallVector<Stmt*, 8> Statements;
+	// FIXME: Create Body
+	{
+	  std::vector<Expr*> args;
+	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	}
+	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
+      }
+      SemaRef.ActOnFinishFunctionBody(Result, Body.get());
+      return Result;
     }
   };
 
