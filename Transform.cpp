@@ -25,6 +25,7 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * UPCR_GET_PSHARED;
+    FunctionDecl * UPCR_PUT_PSHARED;
     QualType upcr_shared_ptr_t;
     QualType upcr_startup_pshalloc_t;
     SourceLocation FakeLocation;
@@ -55,6 +56,11 @@ namespace {
       {
 	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
 	UPCR_GET_PSHARED = CreateFunction(Context, "UPCR_GET_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PUT_PSHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	UPCR_PUT_PSHARED = CreateFunction(Context, "UPCR_PUT_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -164,8 +170,7 @@ namespace {
 	// Ptr should have type upcr_shared_ptr_t
 	Qualifiers Quals = E->getSubExpr()->getType().getQualifiers();
 	QualType ResultType = TransformType(E->getType());
-	VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), getNextTmpIdentifier(), ResultType, SemaRef.Context.getTrivialTypeSourceInfo(ResultType), SC_Auto, SC_None);
-	LocalTemps.push_back(TmpVar);
+	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	// FIXME: Handle other layout qualifiers
 	std::vector<Expr*> args;
 	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
@@ -180,6 +185,33 @@ namespace {
 	// Otherwise use the default transform
 	return TreeTransform::TransformImplicitCastExpr(E);
       }
+    }
+    ExprResult TransformBinaryOperator(BinaryOperator *E) {
+      // Catch assignment to shared variables
+      if(E->getOpcode() == BO_Assign && E->getLHS()->getType().getQualifiers().hasShared()) {
+	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	Expr *LHS = TransformExpr(E->getLHS()).get();
+	Expr *RHS = TransformExpr(E->getRHS()).get();
+	VarDecl *TmpVar = CreateTmpVar(RHS->getType());
+	Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
+	std::vector<Expr*> args;
+	args.push_back(LHS);
+	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
+	// offset
+	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+	// size
+	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+	Expr *Store = BuildUPCRCall(Decls->UPCR_PUT_PSHARED, args).get();
+	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
+      } else {
+	// Otherwise use the default transform
+	return TreeTransform::TransformBinaryOperator(E);
+      }
+    }
+    VarDecl *CreateTmpVar(QualType Ty) {
+      VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), getNextTmpIdentifier(), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_Auto, SC_None);
+      LocalTemps.push_back(TmpVar);
+      return TmpVar;
     }
     IdentifierInfo *getNextTmpIdentifier() {
       // FIXME: return a new name with each call
