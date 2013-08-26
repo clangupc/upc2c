@@ -23,9 +23,14 @@ namespace {
     FunctionDecl * upcr_barrier;
     FunctionDecl * UPCR_BEGIN_FUNCTION;
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
+    FunctionDecl * upcr_startup_pshalloc;
     QualType upcr_shared_ptr_t;
     QualType upcr_startup_pshalloc_t;
+    SourceLocation FakeLocation;
     explicit UPCRDecls(ASTContext& Context) {
+      SourceManager& SourceMgr = Context.getSourceManager();
+      FakeLocation = SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
+
       // types
       upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t");
       upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc");
@@ -53,11 +58,13 @@ namespace {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
 	UPCRT_STARTUP_PSHALLOC = CreateFunction(Context, "UPCRT_STARTUP_PSHALLOC", upcr_startup_pshalloc_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+      {
+	QualType argTypes[] = { Context.getPointerType(upcr_startup_pshalloc_t), Context.IntTy };
+	upcr_startup_pshalloc = CreateFunction(Context, "upcr_startup_pshalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
 
     }
     FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
-      SourceManager& SourceMgr = Context.getSourceManager();
-      SourceLocation FakeLocation = SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
       DeclContext *DC = Context.getTranslationUnitDecl();
       QualType Ty = Context.getFunctionType(RetType, argTypes, numArgs, FunctionProtoType::ExtProtoInfo());
       FunctionDecl *Result = FunctionDecl::Create(Context, DC, FakeLocation, FakeLocation, DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty));
@@ -221,17 +228,20 @@ namespace {
       {
 	Sema::CompoundScopeRAII BodyScope(SemaRef);
 	SmallVector<Stmt*, 8> Statements;
-	// FIXME: Create Body
 	{
 	  std::vector<Expr*> args;
 	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
 	}
+	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	QualType _bupc_pinfo_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_pshalloc_t, ArrayType::Normal, 0);
+	VarDecl *_bupc_pinfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
+					       &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_Auto, SC_None);
+	SmallVector<Expr*, 8> Initializers;
 	for(SharedGlobalsType::const_iterator iter = SharedGlobals.begin(), end = SharedGlobals.end();
 	    iter != end; ++iter) {
 	  std::vector<Expr*> args;
 	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, Decls->upcr_shared_ptr_t, VK_LValue, SourceLocation()).get());
 	  int LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
-	  int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
 	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
 	  bool hasThread = false;
 	  QualType ElemTy = iter->second->getType().getCanonicalType();
@@ -258,8 +268,18 @@ namespace {
 	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
 	    // FIXME: encode the correct mangled type
 	    args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
-	    Statements.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
+	    Initializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
 	  }
+	}
+	// InitializerList semantics vary depending on whether the SourceLocations are valid.
+	SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false, false);
+	Decl *_bupc_pinfo_arr[] = { _bupc_pinfo };
+	Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_pinfo_arr, 1)), SourceLocation(), SourceLocation()).get());
+	{
+	  std::vector<Expr*> args;
+	  args.push_back(SemaRef.BuildDeclRefExpr(_bupc_pinfo, _bupc_pinfo_type, VK_LValue, SourceLocation()).get());
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, SharedGlobals.size()), SemaRef.Context.getSizeType(), SourceLocation()));
+	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_pshalloc, args).get());
 	}
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
