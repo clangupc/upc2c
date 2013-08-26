@@ -209,13 +209,11 @@ namespace {
       }
     }
     VarDecl *CreateTmpVar(QualType Ty) {
-      VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), getNextTmpIdentifier(), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_Auto, SC_None);
+      int ID = static_cast<int>(LocalTemps.size());
+      std::string name = (llvm::Twine("_bupc_spilld") + llvm::Twine(ID)).str();
+      VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(name), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_Auto, SC_None);
       LocalTemps.push_back(TmpVar);
       return TmpVar;
-    }
-    IdentifierInfo *getNextTmpIdentifier() {
-      // FIXME: return a new name with each call
-      return &SemaRef.Context.Idents.get("_bupc_spilld0");
     }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
       return TreeTransform::TransformDecl(Loc, D);
