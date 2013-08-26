@@ -24,6 +24,7 @@ namespace {
     FunctionDecl * UPCR_BEGIN_FUNCTION;
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
+    FunctionDecl * UPCR_GET_PSHARED;
     QualType upcr_shared_ptr_t;
     QualType upcr_startup_pshalloc_t;
     SourceLocation FakeLocation;
@@ -33,7 +34,7 @@ namespace {
 
       // types
       upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t");
-      upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc");
+      upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc_t");
 
       // upcr_notify
       {
@@ -50,14 +51,21 @@ namespace {
 	QualType argTypes[] = { Context.IntTy, Context.IntTy };
 	upcr_barrier = CreateFunction(Context, "upcr_barrier", Context.VoidTy, argTypes, 2);
       }
+      // UPCR_GET_PSHARED
+      {
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET_PSHARED = CreateFunction(Context, "UPCR_GET_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
       // UPCR_BEGIN_FUNCTION
       {
 	UPCR_BEGIN_FUNCTION = CreateFunction(Context, "UPCR_BEGIN_FUNCTION", Context.VoidTy, NULL, 0);
       }
+      // UPCRT_STARTUP_PSHALLOC
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
 	UPCRT_STARTUP_PSHALLOC = CreateFunction(Context, "UPCRT_STARTUP_PSHALLOC", upcr_startup_pshalloc_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+      // upcr_startup_pshalloc
       {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_pshalloc_t), Context.IntTy };
 	upcr_startup_pshalloc = CreateFunction(Context, "upcr_startup_pshalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
@@ -91,8 +99,8 @@ namespace {
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), Decls(D) {
-      AlwaysRebuild();
     }
+    bool AlwaysRebuild() { return true; }
     // TreeTransform ignores AlwayRebuild for literals
     ExprResult TransformIntegerLiteral(IntegerLiteral *E) {
       return IntegerLiteral::Create(SemaRef.Context, E->getValue(), E->getType(), E->getLocation());
@@ -149,10 +157,46 @@ namespace {
       Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
       return SemaRef.Owned(result);
     }
+    ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
+      if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
+	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	// Handle pointer-to-shared reads
+	// Ptr should have type upcr_shared_ptr_t
+	Qualifiers Quals = E->getSubExpr()->getType().getQualifiers();
+	QualType ResultType = TransformType(E->getType());
+	VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), getNextTmpIdentifier(), ResultType, SemaRef.Context.getTrivialTypeSourceInfo(ResultType), SC_Auto, SC_None);
+	LocalTemps.push_back(TmpVar);
+	// FIXME: Handle other layout qualifiers
+	std::vector<Expr*> args;
+	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+	args.push_back(TransformExpr(E->getSubExpr()).get());
+	// offset
+	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+	// size
+	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+	Expr *Load = BuildUPCRCall(Decls->UPCR_GET_PSHARED, args).get();
+	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+      } else {
+	// Otherwise use the default transform
+	return TreeTransform::TransformImplicitCastExpr(E);
+      }
+    }
+    IdentifierInfo *getNextTmpIdentifier() {
+      // FIXME: return a new name with each call
+      return &SemaRef.Context.Idents.get("_bupc_spilld0");
+    }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
       return TreeTransform::TransformDecl(Loc, D);
     }
+    Decl *TransformDefinition(SourceLocation Loc, Decl *D) {
+      return TransformDeclaration(D, SemaRef.CurContext);
+    }
     Decl *TransformDeclaration(Decl *D, DeclContext *DC) {
+      Decl *Result = TransformDeclarationImpl(D, DC);
+      transformedLocalDecl(D, Result);
+      return Result;
+    }
+    Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
@@ -165,7 +209,21 @@ namespace {
 	if(FD->doesThisDeclarationHaveABody()) {
 	  SemaRef.ActOnStartOfFunctionDef(0, result);
 	  Sema::SynthesizedFunctionScope Scope(SemaRef, result);
-	  SemaRef.ActOnFinishFunctionBody(result, TransformStmt(FD->getBody()).get());
+	  Stmt *UserBody = TransformStmt(FD->getBody()).get();
+	  llvm::SmallVector<Stmt*, 8> Body;
+	  {
+	    std::vector<Expr*> args;
+	    Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	  }
+	  // Insert all the temporary variables that we created
+	  for(std::vector<VarDecl*>::const_iterator iter = LocalTemps.begin(), end = LocalTemps.end(); iter != end; ++iter) {
+	    Decl *decl_arr[] = { *iter };
+	    Body.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, decl_arr, 1)), SourceLocation(), SourceLocation()).get());
+	  }
+	  LocalTemps.clear();
+	  // Insert the user code
+	  Body.push_back(UserBody);
+	  SemaRef.ActOnFinishFunctionBody(result, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get());
 	}
 	return result;
       } else if(VarDecl *VD = dyn_cast<VarDecl>(D)) {
@@ -211,6 +269,7 @@ namespace {
 	Dst->addDecl(TransformDeclaration(*iter, Dst));
       }
     }
+    std::vector<VarDecl*> LocalTemps;
     // The shared variables that need to be initialized
     // all must have type upcr_shared_ptr_t
     // first = upcr_shared_ptr_t, second = original declaration
