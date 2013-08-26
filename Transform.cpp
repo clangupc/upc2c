@@ -414,6 +414,7 @@ namespace {
 
 int main(int argc, const char ** argv) {
   std::vector<std::string> options(argv, argv + argc);
+  options.push_back("-fsyntax-only");
   FileManager Files((FileSystemOptions()));
   ToolInvocation tool(options, new RemoveUPCAction, &Files);
   tool.run();
