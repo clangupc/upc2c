@@ -23,10 +23,16 @@ namespace {
     FunctionDecl * upcr_barrier;
     FunctionDecl * UPCR_BEGIN_FUNCTION;
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
+    FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
+    FunctionDecl * upcr_startup_shalloc;
     FunctionDecl * UPCR_GET_PSHARED;
     FunctionDecl * UPCR_PUT_PSHARED;
+    FunctionDecl * UPCR_GET_SHARED;
+    FunctionDecl * UPCR_PUT_SHARED;
     QualType upcr_shared_ptr_t;
+    QualType upcr_pshared_ptr_t;
+    QualType upcr_startup_shalloc_t;
     QualType upcr_startup_pshalloc_t;
     SourceLocation FakeLocation;
     explicit UPCRDecls(ASTContext& Context) {
@@ -35,6 +41,8 @@ namespace {
 
       // types
       upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t");
+      upcr_pshared_ptr_t = CreateTypedefType(Context, "upcr_pshared_ptr_t");
+      upcr_startup_shalloc_t = CreateTypedefType(Context, "upcr_startup_shalloc_t");
       upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc_t");
 
       // upcr_notify
@@ -54,13 +62,23 @@ namespace {
       }
       // UPCR_GET_PSHARED
       {
-	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
 	UPCR_GET_PSHARED = CreateFunction(Context, "UPCR_GET_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PUT_PSHARED
       {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
 	UPCR_PUT_PSHARED = CreateFunction(Context, "UPCR_PUT_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_GET_SHARED
+      {
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET_SHARED = CreateFunction(Context, "UPCR_GET_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PUT_SHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	UPCR_PUT_SHARED = CreateFunction(Context, "UPCR_PUT_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -68,13 +86,23 @@ namespace {
       }
       // UPCRT_STARTUP_PSHALLOC
       {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
 	UPCRT_STARTUP_PSHALLOC = CreateFunction(Context, "UPCRT_STARTUP_PSHALLOC", upcr_startup_pshalloc_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCRT_STARTUP_SHALLOC
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy, Context.IntTy, Context. getPointerType(Context.getConstType(Context.CharTy)) };
+	UPCRT_STARTUP_SHALLOC = CreateFunction(Context, "UPCRT_STARTUP_SHALLOC", upcr_startup_shalloc_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // upcr_startup_pshalloc
       {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_pshalloc_t), Context.IntTy };
 	upcr_startup_pshalloc = CreateFunction(Context, "upcr_startup_pshalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_startup_shalloc
+      {
+	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
+	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
 
     }
@@ -226,6 +254,9 @@ namespace {
       transformedLocalDecl(D, Result);
       return Result;
     }
+    bool isPhaseless(QualType Pointee) {
+      return Pointee.getQualifiers().getLayoutQualifier() <= 1;
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
@@ -258,9 +289,10 @@ namespace {
 	return result;
       } else if(VarDecl *VD = dyn_cast<VarDecl>(D)) {
 	if(VD->getType().getQualifiers().hasShared()) {
+	  QualType VarType = (isPhaseless(VD->getType())? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t );
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(),
 					    VD->getLocation(), VD->getIdentifier(),
-					    Decls->upcr_shared_ptr_t, SemaRef.Context.getTrivialTypeSourceInfo(Decls->upcr_shared_ptr_t), VD->getStorageClass(), VD->getStorageClassAsWritten());
+					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass(), VD->getStorageClassAsWritten());
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  return result;
 	} else {
@@ -322,14 +354,15 @@ namespace {
 	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
 	}
 	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	QualType _bupc_info_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_shalloc_t, ArrayType::Normal, 0);
 	QualType _bupc_pinfo_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_pshalloc_t, ArrayType::Normal, 0);
-	VarDecl *_bupc_pinfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
-					       &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_Auto, SC_None);
 	SmallVector<Expr*, 8> Initializers;
+	SmallVector<Expr*, 8> PInitializers;
 	for(SharedGlobalsType::const_iterator iter = SharedGlobals.begin(), end = SharedGlobals.end();
 	    iter != end; ++iter) {
 	  std::vector<Expr*> args;
-	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, Decls->upcr_shared_ptr_t, VK_LValue, SourceLocation()).get());
+	  bool Phaseless = (iter->first->getType() == Decls->upcr_pshared_ptr_t);
+	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, iter->first->getType(), VK_LValue, SourceLocation()).get());
 	  int LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
 	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
 	  bool hasThread = false;
@@ -347,7 +380,7 @@ namespace {
 	    }
 	    ElemTy = AT->getElementType();
 	  }
-	  int ElementSize = SemaRef.Context.getTypeSize(ElemTy);
+	  int ElementSize = SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity();
 	  if(LayoutQualifier == 0) {
 	    // FIXME:
 	  } else {
@@ -357,17 +390,41 @@ namespace {
 	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
 	    // FIXME: encode the correct mangled type
 	    args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
-	    Initializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
+	    if(Phaseless) {
+	      PInitializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
+	    } else {
+	      Initializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_SHALLOC, args).get());
+	    }
 	  }
 	}
-	// InitializerList semantics vary depending on whether the SourceLocations are valid.
-	SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false, false);
-	Decl *_bupc_pinfo_arr[] = { _bupc_pinfo };
-	Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_pinfo_arr, 1)), SourceLocation(), SourceLocation()).get());
-	{
+	VarDecl *_bupc_info;
+	VarDecl *_bupc_pinfo;
+	if(!Initializers.empty()) {
+	  _bupc_info = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
+						 &SemaRef.Context.Idents.get("_bupc_info"), _bupc_info_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_info_type), SC_Auto, SC_None);
+	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
+	  SemaRef.AddInitializerToDecl(_bupc_info, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false, false);
+	  Decl *_bupc_info_arr[] = { _bupc_info };
+	  Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_info_arr, 1)), SourceLocation(), SourceLocation()).get());
+	}
+	if(!PInitializers.empty()) {
+	  _bupc_pinfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
+						 &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_Auto, SC_None);
+	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
+	  SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, PInitializers, Decls->FakeLocation).get(), false, false);
+	  Decl *_bupc_pinfo_arr[] = { _bupc_pinfo };
+	  Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_pinfo_arr, 1)), SourceLocation(), SourceLocation()).get());
+	}
+	if(!Initializers.empty()) {
+	  std::vector<Expr*> args;
+	  args.push_back(SemaRef.BuildDeclRefExpr(_bupc_info, _bupc_info_type, VK_LValue, SourceLocation()).get());
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, Initializers.size()), SemaRef.Context.getSizeType(), SourceLocation()));
+	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_shalloc, args).get());
+	}
+	if(!PInitializers.empty()) {
 	  std::vector<Expr*> args;
 	  args.push_back(SemaRef.BuildDeclRefExpr(_bupc_pinfo, _bupc_pinfo_type, VK_LValue, SourceLocation()).get());
-	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, SharedGlobals.size()), SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, PInitializers.size()), SemaRef.Context.getSizeType(), SourceLocation()));
 	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_pshalloc, args).get());
 	}
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
