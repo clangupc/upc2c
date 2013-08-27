@@ -30,6 +30,16 @@ namespace {
     FunctionDecl * UPCR_PUT_PSHARED;
     FunctionDecl * UPCR_GET_SHARED;
     FunctionDecl * UPCR_PUT_SHARED;
+    FunctionDecl * UPCR_ADD_SHARED;
+    FunctionDecl * UPCR_ADD_PSHAREDI;
+    FunctionDecl * UPCR_ADD_PSHARED1;
+    FunctionDecl * UPCR_SUB_SHARED;
+    FunctionDecl * UPCR_SUB_PSHAREDI;
+    FunctionDecl * UPCR_SUB_PSHARED1;
+    FunctionDecl * UPCR_ISEQUAL_SHARED_SHARED;
+    FunctionDecl * UPCR_ISEQUAL_SHARED_PSHARED;
+    FunctionDecl * UPCR_ISEQUAL_PSHARED_SHARED;
+    FunctionDecl * UPCR_ISEQUAL_PSHARED_PSHARED;
     QualType upcr_shared_ptr_t;
     QualType upcr_pshared_ptr_t;
     QualType upcr_startup_shalloc_t;
@@ -79,6 +89,56 @@ namespace {
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
 	UPCR_PUT_SHARED = CreateFunction(Context, "UPCR_PUT_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ADD_SHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy };
+	UPCR_ADD_SHARED = CreateFunction(Context, "UPCR_ADD_SHARED", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ADD_PSHAREDI
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_ADD_PSHAREDI = CreateFunction(Context, "UPCR_ADD_PSHAREDI", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ADD_PSHARED1
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_ADD_PSHARED1 = CreateFunction(Context, "UPCR_ADD_PSHARED1", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SUB_SHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_SUB_SHARED = CreateFunction(Context, "UPCR_SUB_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SUB_PSHAREDI
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t, Context.IntTy };
+	UPCR_SUB_PSHAREDI = CreateFunction(Context, "UPCR_SUB_PSHAREDI", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SUB_PSHARED1
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t, Context.IntTy };
+	UPCR_SUB_PSHARED1 = CreateFunction(Context, "UPCR_SUB_PSHARED1", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ISEQUAL_SHARED_SHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, upcr_shared_ptr_t };
+	UPCR_ISEQUAL_SHARED_SHARED = CreateFunction(Context, "UPCR_ISEQUAL_SHARED_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ISEQUAL_SHARED_PSHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, upcr_pshared_ptr_t };
+	UPCR_ISEQUAL_SHARED_PSHARED = CreateFunction(Context, "UPCR_ISEQUAL_SHARED_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ISEQUAL_PSHARED_SHARED
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_shared_ptr_t };
+	UPCR_ISEQUAL_PSHARED_SHARED = CreateFunction(Context, "UPCR_ISEQUAL_PSHARED_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ISEQUAL_PSHARED_PSHARED
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t };
+	UPCR_ISEQUAL_PSHARED_PSHARED = CreateFunction(Context, "UPCR_ISEQUAL_PSHARED_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -215,6 +275,16 @@ namespace {
 	return TreeTransform::TransformImplicitCastExpr(E);
       }
     }
+    bool isPointerToShared(QualType Ty) {
+      if(const PointerType * PTy = Ty->getAs<PointerType>()) {
+	return PTy->getPointeeType().getQualifiers().hasShared();
+      } else {
+	return false;
+      }
+    }
+    IntegerLiteral *CreateInteger(QualType Ty, int Value) {
+      return IntegerLiteral::Create(SemaRef.Context, APInt(SemaRef.Context.getTypeSize(Ty), Value), Ty, SourceLocation());
+    }
     ExprResult TransformBinaryOperator(BinaryOperator *E) {
       // Catch assignment to shared variables
       if(E->getOpcode() == BO_Assign && E->getLHS()->getType().getQualifiers().hasShared()) {
@@ -234,9 +304,93 @@ namespace {
 	Expr *Store = BuildUPCRCall(Phaseless?Decls->UPCR_PUT_PSHARED:Decls->UPCR_PUT_SHARED, args).get();
 	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
       } else {
-	// Otherwise use the default transform
-	return TreeTransform::TransformBinaryOperator(E);
+	Expr *LHS = E->getLHS();
+	Expr *RHS = E->getRHS();
+	bool LHSIsShared = isPointerToShared(E->getLHS()->getType());
+	bool RHSIsShared = isPointerToShared(E->getRHS()->getType());
+	if(LHSIsShared && RHSIsShared && E->getOpcode() == BO_Sub) {
+	  // Pointer - Pointer
+	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
+	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  std::vector<Expr*> args;
+	  args.push_back(TransformExpr(LHS).get());
+	  args.push_back(TransformExpr(RHS).get());
+	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
+	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	  if(LayoutQualifier == 0) {
+	    return BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args);
+	  } else if(LayoutQualifier == 1) {
+	    return BuildUPCRCall(Decls->UPCR_SUB_PSHARED1, args);
+	  } else {
+	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
+	    return BuildUPCRCall(Decls->UPCR_SUB_SHARED, args);
+	  }
+	} else if((LHSIsShared || RHSIsShared) && (E->getOpcode() == BO_Add || E->getOpcode() == BO_Sub)) {
+	  // Pointer +/- Integer
+	  if(RHSIsShared) { std::swap(LHS, RHS); }
+	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
+	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  Expr *IntVal = TransformExpr(RHS).get();
+	  if(E->getOpcode() == BO_Sub) {
+	    IntVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, IntVal).get();
+	  }
+	  std::vector<Expr*> args;
+	  args.push_back(TransformExpr(LHS).get());
+	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
+	  args.push_back(IntVal);
+	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	  if(LayoutQualifier == 0) {
+	    return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+	  } else if(LayoutQualifier == 1) {
+	    return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+	  } else {
+	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
+	    return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+	  }
+	} else if(LHSIsShared && RHSIsShared && (E->getOpcode() == BO_EQ || E->getOpcode() == BO_NE)) {
+	  // Equality Comparison
+	  std::vector<Expr*> args;
+	  args.push_back(TransformExpr(LHS).get());
+	  args.push_back(TransformExpr(RHS).get());
+	  QualType LHSPointee = LHS->getType()->getAs<PointerType>()->getPointeeType();
+	  QualType RHSPointee = RHS->getType()->getAs<PointerType>()->getPointeeType();
+	  ExprResult Result;
+	  if(isPhaseless(LHSPointee) && isPhaseless(RHSPointee)) {
+	    Result = BuildUPCRCall(Decls->UPCR_ISEQUAL_PSHARED_PSHARED, args);
+	  } else if(isPhaseless(LHSPointee) && !isPhaseless(RHSPointee)) {
+	    Result = BuildUPCRCall(Decls->UPCR_ISEQUAL_PSHARED_SHARED, args);
+	  } else if(!isPhaseless(LHSPointee) && isPhaseless(RHSPointee)) {
+	    Result = BuildUPCRCall(Decls->UPCR_ISEQUAL_SHARED_PSHARED, args);
+	  } else if(!isPhaseless(LHSPointee) && !isPhaseless(RHSPointee)) {
+	    Result = BuildUPCRCall(Decls->UPCR_ISEQUAL_SHARED_SHARED, args);
+	  }
+	  if(E->getOpcode() == BO_NE) {
+	    Result = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_LNot, Result.get());
+	  }
+	  return Result;
+	} else if(LHSIsShared && RHSIsShared && (E->getOpcode() == BO_LT || E->getOpcode() == BO_LE || E->getOpcode() == BO_GT || E->getOpcode() == BO_GE)) {
+	  // Relational Comparison
+	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
+	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  std::vector<Expr*> args;
+	  args.push_back(TransformExpr(LHS).get());
+	  args.push_back(TransformExpr(RHS).get());
+	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
+	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	  Expr *Diff;
+	  if(LayoutQualifier == 0) {
+	    Diff = BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args).get();
+	  } else if(LayoutQualifier == 1) {
+	    Diff = BuildUPCRCall(Decls->UPCR_SUB_PSHARED1, args).get();
+	  } else {
+	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
+	    Diff = BuildUPCRCall(Decls->UPCR_SUB_SHARED, args).get();
+	  }
+	  return SemaRef.CreateBuiltinBinOp(SourceLocation(), E->getOpcode(), Diff, CreateInteger(SemaRef.Context.IntTy, 0));
+	}
       }
+      // Otherwise use the default transform
+      return TreeTransform::TransformBinaryOperator(E);
     }
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
@@ -258,6 +412,17 @@ namespace {
     }
     bool isPhaseless(QualType Pointee) {
       return Pointee.getQualifiers().getLayoutQualifier() <= 1;
+    }
+    QualType TransformPointerType(TypeLocBuilder &TLB, PointerTypeLoc TL) {
+      if(isPointerToShared(TL.getType())) {
+	QualType Result = isPhaseless(TL.getType()->getAs<PointerType>()->getPointeeType())?
+	  Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
+	TypedefTypeLoc NewT = TLB.push<TypedefTypeLoc>(Result);
+	NewT.setNameLoc(SourceLocation());
+	return Result;
+      } else {
+	return TreeTransform::TransformPointerType(TLB, TL);
+      }
     }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
