@@ -197,6 +197,7 @@ namespace {
 	// Handle pointer-to-shared reads
 	// Ptr should have type upcr_shared_ptr_t
 	Qualifiers Quals = E->getSubExpr()->getType().getQualifiers();
+	bool Phaseless = isPhaseless(E->getSubExpr()->getType());
 	QualType ResultType = TransformType(E->getType());
 	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	// FIXME: Handle other layout qualifiers
@@ -207,7 +208,7 @@ namespace {
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
 	// size
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Load = BuildUPCRCall(Decls->UPCR_GET_PSHARED, args).get();
+	Expr *Load = BuildUPCRCall(Phaseless?Decls->UPCR_GET_PSHARED:Decls->UPCR_GET_SHARED, args).get();
 	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
       } else {
 	// Otherwise use the default transform
@@ -218,6 +219,7 @@ namespace {
       // Catch assignment to shared variables
       if(E->getOpcode() == BO_Assign && E->getLHS()->getType().getQualifiers().hasShared()) {
 	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	bool Phaseless = isPhaseless(E->getLHS()->getType());
 	Expr *LHS = TransformExpr(E->getLHS()).get();
 	Expr *RHS = TransformExpr(E->getRHS()).get();
 	VarDecl *TmpVar = CreateTmpVar(RHS->getType());
@@ -229,7 +231,7 @@ namespace {
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
 	// size
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Store = BuildUPCRCall(Decls->UPCR_PUT_PSHARED, args).get();
+	Expr *Store = BuildUPCRCall(Phaseless?Decls->UPCR_PUT_PSHARED:Decls->UPCR_PUT_SHARED, args).get();
 	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
       } else {
 	// Otherwise use the default transform
