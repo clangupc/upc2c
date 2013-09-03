@@ -31,6 +31,10 @@ namespace {
     FunctionDecl * UPCR_GET_SHARED;
     FunctionDecl * UPCR_PUT_SHARED;
     FunctionDecl * UPCR_ADD_SHARED;
+    FunctionDecl * UPCR_GET_PSHARED_STRICT;
+    FunctionDecl * UPCR_PUT_PSHARED_STRICT;
+    FunctionDecl * UPCR_GET_SHARED_STRICT;
+    FunctionDecl * UPCR_PUT_SHARED_STRICT;
     FunctionDecl * UPCR_ADD_PSHAREDI;
     FunctionDecl * UPCR_ADD_PSHARED1;
     FunctionDecl * UPCR_SUB_SHARED;
@@ -89,6 +93,26 @@ namespace {
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
 	UPCR_PUT_SHARED = CreateFunction(Context, "UPCR_PUT_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_GET_PSHARED_STRICT
+      {
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET_PSHARED_STRICT = CreateFunction(Context, "UPCR_GET_PSHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PUT_PSHARED_STRICT
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	UPCR_PUT_PSHARED_STRICT = CreateFunction(Context, "UPCR_PUT_PSHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_GET_SHARED_STRICT
+      {
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET_SHARED_STRICT = CreateFunction(Context, "UPCR_GET_SHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PUT_SHARED_STRICT
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	UPCR_PUT_SHARED_STRICT = CreateFunction(Context, "UPCR_PUT_SHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_SHARED
       {
@@ -258,6 +282,22 @@ namespace {
 	// Ptr should have type upcr_shared_ptr_t
 	Qualifiers Quals = E->getSubExpr()->getType().getQualifiers();
 	bool Phaseless = isPhaseless(E->getSubExpr()->getType());
+	bool Strict = Quals.hasStrict();
+	// Select the correct function to call
+	FunctionDecl *Accessor;
+	if(Phaseless) {
+	  if(Strict) {
+	    Accessor = Decls->UPCR_GET_PSHARED_STRICT;
+	  } else {
+	    Accessor = Decls->UPCR_GET_PSHARED;
+	  }
+	} else {
+	  if(Strict) {
+	    Accessor = Decls->UPCR_GET_SHARED_STRICT;
+	  } else {
+	    Accessor = Decls->UPCR_GET_SHARED;
+	  }
+	}
 	QualType ResultType = TransformType(E->getType());
 	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	// FIXME: Handle other layout qualifiers
@@ -268,7 +308,7 @@ namespace {
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
 	// size
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Load = BuildUPCRCall(Phaseless?Decls->UPCR_GET_PSHARED:Decls->UPCR_GET_SHARED, args).get();
+	Expr *Load = BuildUPCRCall(Accessor, args).get();
 	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
       } else {
 	// Otherwise use the default transform
@@ -289,7 +329,24 @@ namespace {
       // Catch assignment to shared variables
       if(E->getOpcode() == BO_Assign && E->getLHS()->getType().getQualifiers().hasShared()) {
 	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+	Qualifiers Quals = E->getLHS()->getType().getQualifiers(); 
 	bool Phaseless = isPhaseless(E->getLHS()->getType());
+	bool Strict = Quals.hasStrict();
+	// Select the correct function to call
+	FunctionDecl *Accessor;
+	if(Phaseless) {
+	  if(Strict) {
+	    Accessor = Decls->UPCR_PUT_PSHARED_STRICT;
+	  } else {
+	    Accessor = Decls->UPCR_PUT_PSHARED;
+	  }
+	} else {
+	  if(Strict) {
+	    Accessor = Decls->UPCR_PUT_SHARED_STRICT;
+	  } else {
+	    Accessor = Decls->UPCR_PUT_SHARED;
+	  }
+	}
 	Expr *LHS = TransformExpr(E->getLHS()).get();
 	Expr *RHS = TransformExpr(E->getRHS()).get();
 	VarDecl *TmpVar = CreateTmpVar(RHS->getType());
@@ -301,7 +358,7 @@ namespace {
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
 	// size
 	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Store = BuildUPCRCall(Phaseless?Decls->UPCR_PUT_PSHARED:Decls->UPCR_PUT_SHARED, args).get();
+	Expr *Store = BuildUPCRCall(Accessor, args).get();
 	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
       } else {
 	Expr *LHS = E->getLHS();
