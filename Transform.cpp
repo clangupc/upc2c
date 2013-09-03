@@ -247,6 +247,12 @@ namespace {
     RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), Decls(D) {
     }
     bool AlwaysRebuild() { return true; }
+    ExprResult BuildParens(Expr * E) {
+      return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), E);
+    }
+    ExprResult BuildComma(Expr * LHS, Expr * RHS) {
+      return SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, LHS, RHS);
+    }
     // TreeTransform ignores AlwayRebuild for literals
     ExprResult TransformIntegerLiteral(IntegerLiteral *E) {
       return IntegerLiteral::Create(SemaRef.Context, E->getValue(), E->getType(), E->getLocation());
@@ -308,39 +314,7 @@ namespace {
     }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
-	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
-	// Handle pointer-to-shared reads
-	// Ptr should have type upcr_shared_ptr_t
-	Qualifiers Quals = E->getSubExpr()->getType().getQualifiers();
-	bool Phaseless = isPhaseless(E->getSubExpr()->getType());
-	bool Strict = Quals.hasStrict();
-	// Select the correct function to call
-	FunctionDecl *Accessor;
-	if(Phaseless) {
-	  if(Strict) {
-	    Accessor = Decls->UPCR_GET_PSHARED_STRICT;
-	  } else {
-	    Accessor = Decls->UPCR_GET_PSHARED;
-	  }
-	} else {
-	  if(Strict) {
-	    Accessor = Decls->UPCR_GET_SHARED_STRICT;
-	  } else {
-	    Accessor = Decls->UPCR_GET_SHARED;
-	  }
-	}
-	QualType ResultType = TransformType(E->getType());
-	VarDecl *TmpVar = CreateTmpVar(ResultType);
-	// FIXME: Handle other layout qualifiers
-	std::vector<Expr*> args;
-	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
-	args.push_back(TransformExpr(E->getSubExpr()).get());
-	// offset
-	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
-	// size
-	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Load = BuildUPCRCall(Accessor, args).get();
-	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), TransformType(E->getType()), E->getSubExpr()->getType());
       } else {
 	// Otherwise use the default transform
 	return TreeTransform::TransformImplicitCastExpr(E);
@@ -356,41 +330,76 @@ namespace {
     IntegerLiteral *CreateInteger(QualType Ty, int Value) {
       return IntegerLiteral::Create(SemaRef.Context, APInt(SemaRef.Context.getTypeSize(Ty), Value), Ty, SourceLocation());
     }
+    ExprResult BuildUPCRLoad(Expr * E, QualType ResultType, QualType Ty) {
+      int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+      Qualifiers Quals = Ty.getQualifiers();
+      bool Phaseless = isPhaseless(Ty);
+      bool Strict = Quals.hasStrict();
+      // Select the correct function to call
+      FunctionDecl *Accessor;
+      if(Phaseless) {
+	if(Strict) {
+	  Accessor = Decls->UPCR_GET_PSHARED_STRICT;
+	} else {
+	  Accessor = Decls->UPCR_GET_PSHARED;
+	}
+      } else {
+	if(Strict) {
+	  Accessor = Decls->UPCR_GET_SHARED_STRICT;
+	} else {
+	  Accessor = Decls->UPCR_GET_SHARED;
+	}
+      }
+      VarDecl *TmpVar = CreateTmpVar(ResultType);
+      // FIXME: Handle other layout qualifiers
+      std::vector<Expr*> args;
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+      args.push_back(E);
+      // offset
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+      // size
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      Expr *Load = BuildUPCRCall(Accessor, args).get();
+      return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+    }
+    ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty) {
+      int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
+      Qualifiers Quals = Ty.getQualifiers(); 
+      bool Phaseless = isPhaseless(Ty);
+      bool Strict = Quals.hasStrict();
+      // Select the correct function to call
+      FunctionDecl *Accessor;
+      if(Phaseless) {
+	if(Strict) {
+	  Accessor = Decls->UPCR_PUT_PSHARED_STRICT;
+	} else {
+	  Accessor = Decls->UPCR_PUT_PSHARED;
+	}
+      } else {
+	if(Strict) {
+	  Accessor = Decls->UPCR_PUT_SHARED_STRICT;
+	} else {
+	  Accessor = Decls->UPCR_PUT_SHARED;
+	}
+      }
+      VarDecl *TmpVar = CreateTmpVar(RHS->getType());
+      Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
+      std::vector<Expr*> args;
+      args.push_back(LHS);
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
+      // offset
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+      // size
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      Expr *Store = BuildUPCRCall(Accessor, args).get();
+      return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
+    }
     ExprResult TransformBinaryOperator(BinaryOperator *E) {
       // Catch assignment to shared variables
       if(E->getOpcode() == BO_Assign && E->getLHS()->getType().getQualifiers().hasShared()) {
-	int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
-	Qualifiers Quals = E->getLHS()->getType().getQualifiers(); 
-	bool Phaseless = isPhaseless(E->getLHS()->getType());
-	bool Strict = Quals.hasStrict();
-	// Select the correct function to call
-	FunctionDecl *Accessor;
-	if(Phaseless) {
-	  if(Strict) {
-	    Accessor = Decls->UPCR_PUT_PSHARED_STRICT;
-	  } else {
-	    Accessor = Decls->UPCR_PUT_PSHARED;
-	  }
-	} else {
-	  if(Strict) {
-	    Accessor = Decls->UPCR_PUT_SHARED_STRICT;
-	  } else {
-	    Accessor = Decls->UPCR_PUT_SHARED;
-	  }
-	}
 	Expr *LHS = TransformExpr(E->getLHS()).get();
 	Expr *RHS = TransformExpr(E->getRHS()).get();
-	VarDecl *TmpVar = CreateTmpVar(RHS->getType());
-	Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
-	std::vector<Expr*> args;
-	args.push_back(LHS);
-	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
-	// offset
-	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
-	// size
-	args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
-	Expr *Store = BuildUPCRCall(Accessor, args).get();
-	return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
+	return BuildUPCRStore(LHS, RHS, E->getLHS()->getType());
       } else {
 	Expr *LHS = E->getLHS();
 	Expr *RHS = E->getRHS();
@@ -479,6 +488,24 @@ namespace {
       }
       // Otherwise use the default transform
       return TreeTransform::TransformBinaryOperator(E);
+    }
+    ExprResult TransformCompoundAssignOperator(CompoundAssignOperator *E) {
+      if(E->getLHS()->getType().getQualifiers().hasShared()) {
+	QualType Ty = E->getLHS()->getType();
+	bool Phaseless = isPhaseless(Ty);
+	QualType PtrType = Phaseless? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
+	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
+	BinaryOperatorKind Opc = BinaryOperator::getOpForCompoundAssignment(E->getOpcode());
+	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
+	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
+	Expr * LHSVal = BuildUPCRLoad(TmpPtr, TransformType(Ty.getUnqualifiedType()), Ty).get();
+	Expr * OpResult = SemaRef.CreateBuiltinBinOp(SourceLocation(), Opc, LHSVal, RHS).get();
+	Expr * Result = BuildUPCRStore(TmpPtr, OpResult, Ty).get();
+	return BuildParens(BuildComma(SaveLHS, Result).get());
+      } else {
+	return TreeTransform::TransformCompoundAssignOperator(E);
+      }
     }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
       // Transform the initialization statement
