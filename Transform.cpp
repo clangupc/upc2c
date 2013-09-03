@@ -546,6 +546,30 @@ namespace {
 	return TreeTransform::TransformCompoundAssignOperator(E);
       }
     }
+    ExprResult TransformArraySubscriptExpr(ArraySubscriptExpr *E) {
+      if(isPointerToShared(E->getBase()->getType())) {
+	Expr *LHS = E->getBase();
+	Expr *RHS = E->getIdx();
+	QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
+	int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	Expr *IntVal = TransformExpr(RHS).get();
+	std::vector<Expr*> args;
+	args.push_back(TransformExpr(LHS).get());
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
+	args.push_back(IntVal);
+	int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	if(LayoutQualifier == 0) {
+	  return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+	} else if(LayoutQualifier == 1) {
+	  return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+	} else {
+	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
+	  return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+	}
+      } else {
+	return TreeTransform::TransformArraySubscriptExpr(E);
+      }
+    }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
       // Transform the initialization statement
       StmtResult Init = getDerived().TransformStmt(S->getInit());
