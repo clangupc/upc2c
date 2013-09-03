@@ -360,7 +360,7 @@ namespace {
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
-      return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+      return BuildParens(BuildComma(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
     }
     ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty) {
       int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
@@ -392,7 +392,7 @@ namespace {
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Store = BuildUPCRCall(Accessor, args).get();
-      return SemaRef.ActOnParenExpr(SourceLocation(), SourceLocation(), SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Comma, SetTmp, Store).get());
+      return BuildParens(BuildComma(SetTmp, Store).get());
     }
     ExprResult TransformBinaryOperator(BinaryOperator *E) {
       // Catch assignment to shared variables
