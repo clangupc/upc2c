@@ -21,6 +21,10 @@ namespace {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
     FunctionDecl * upcr_barrier;
+    FunctionDecl * upcr_mythread;
+    FunctionDecl * upcr_threads;
+    FunctionDecl * upcr_hasMyAffinity_pshared;
+    FunctionDecl * upcr_hasMyAffinity_shared;
     FunctionDecl * UPCR_BEGIN_FUNCTION;
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
@@ -44,6 +48,7 @@ namespace {
     FunctionDecl * UPCR_ISEQUAL_SHARED_PSHARED;
     FunctionDecl * UPCR_ISEQUAL_PSHARED_SHARED;
     FunctionDecl * UPCR_ISEQUAL_PSHARED_PSHARED;
+    VarDecl * upcr_forall_control;
     QualType upcr_shared_ptr_t;
     QualType upcr_pshared_ptr_t;
     QualType upcr_startup_shalloc_t;
@@ -73,6 +78,24 @@ namespace {
       {
 	QualType argTypes[] = { Context.IntTy, Context.IntTy };
 	upcr_barrier = CreateFunction(Context, "upcr_barrier", Context.VoidTy, argTypes, 2);
+      }
+      // upcr_mythread
+      {
+	upcr_mythread = CreateFunction(Context, "upcr_mythread", Context.IntTy, 0, 0);
+      }
+      // upcr_threads
+      {
+	upcr_threads = CreateFunction(Context, "upcr_threads", Context.IntTy, 0, 0);
+      }
+      // upcr_hasMyAffinity_pshared
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t };
+	upcr_hasMyAffinity_pshared = CreateFunction(Context, "upcr_hasMyAffinity_pshared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_hasMyAffinity_shared
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t };
+	upcr_hasMyAffinity_shared = CreateFunction(Context, "upcr_hasMyAffinity_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_PSHARED
       {
@@ -188,6 +211,11 @@ namespace {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
 	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+      // upcr_forall_control
+      {
+	DeclContext *DC = Context.getTranslationUnitDecl();
+	upcr_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern, SC_Extern);
+      }
 
     }
     FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
@@ -226,6 +254,9 @@ namespace {
     ExprResult BuildUPCRCall(FunctionDecl *FD, std::vector<Expr*>& args) {
       ExprResult Fn = SemaRef.BuildDeclRefExpr(FD, FD->getType(), VK_LValue, SourceLocation());
       return SemaRef.BuildResolvedCallExpr(Fn.get(), FD, SourceLocation(), args.data(), args.size(), SourceLocation());
+    }
+    ExprResult BuildUPCRDeclRef(VarDecl *VD) {
+      return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation());
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       Expr *ID = S->getIdValue();
@@ -448,6 +479,84 @@ namespace {
       }
       // Otherwise use the default transform
       return TreeTransform::TransformBinaryOperator(E);
+    }
+    StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
+      // Transform the initialization statement
+      StmtResult Init = getDerived().TransformStmt(S->getInit());
+
+      // Transform the condition
+      ExprResult Cond;
+      VarDecl *ConditionVar = 0;
+      if (S->getConditionVariable()) {
+	ConditionVar
+        = cast_or_null<VarDecl>(
+                     TransformDefinition(
+                                        S->getConditionVariable()->getLocation(),
+                                                      S->getConditionVariable()));
+      } else {
+	Cond = TransformExpr(S->getCond());
+	
+	if (S->getCond()) {
+	  // Convert the condition to a boolean value.
+	  ExprResult CondE = getSema().ActOnBooleanCondition(0, S->getForLoc(),
+							     Cond.get());
+	  
+	  Cond = CondE.get();
+	}
+      }
+      
+      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+      
+      // Transform the increment
+      ExprResult Inc = TransformExpr(S->getInc());
+      if (Inc.isInvalid())
+	return StmtError();
+      
+      Sema::FullExprArg FullInc(getSema().MakeFullExpr(Inc.get()));
+
+      // Transform the body
+      StmtResult Body = TransformStmt(S->getBody());
+
+      StmtResult PlainFor = SemaRef.ActOnForStmt(S->getForLoc(), S->getLParenLoc(),
+						 Init.get(), FullCond, ConditionVar,
+						 FullInc, S->getRParenLoc(), Body.get());
+
+      // If the thread affinity is not specified, upc_forall is
+      // the same as a for loop.
+      if(!S->getAfnty()) {
+	return PlainFor;
+      }
+
+      ExprResult Afnty = TransformExpr(S->getAfnty());
+      ExprResult ThreadTest;
+      if(isPointerToShared(S->getAfnty()->getType())) {
+	bool Phaseless = isPhaseless(S->getAfnty()->getType()->getAs<PointerType>()->getPointeeType());
+	std::vector<Expr*> args;
+	args.push_back(Afnty.get());
+	ThreadTest = BuildUPCRCall(Phaseless?Decls->upcr_hasMyAffinity_pshared:Decls->upcr_hasMyAffinity_shared, args);
+      } else {
+	std::vector<Expr*> args;
+	ThreadTest = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, Afnty.get(), BuildUPCRCall(Decls->upcr_mythread, args).get());
+      }
+
+      StmtResult UPCBody = SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ThreadTest.get()), NULL, Body.get(), SourceLocation(), NULL);
+
+      StmtResult UPCFor = SemaRef.ActOnForStmt(S->getForLoc(), S->getLParenLoc(),
+						 Init.get(), FullCond, ConditionVar,
+						 FullInc, S->getRParenLoc(), UPCBody.get());
+
+      StmtResult UPCForWrapper;
+      {
+	Sema::CompoundScopeRAII BodyScope(SemaRef);
+	SmallVector<Stmt*, 8> Statements;
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcr_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
+	Statements.push_back(UPCFor.get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcr_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
+
+	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
+      }
+
+      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcr_forall_control).get()), NULL, PlainFor.get(), SourceLocation(), UPCForWrapper.get());
     }
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
