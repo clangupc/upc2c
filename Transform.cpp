@@ -331,6 +331,12 @@ namespace {
       return IntegerLiteral::Create(SemaRef.Context, APInt(SemaRef.Context.getTypeSize(Ty), Value), Ty, SourceLocation());
     }
     ExprResult BuildUPCRLoad(Expr * E, QualType ResultType, QualType Ty) {
+      std::pair<Expr *, Expr *> LoadAndVar = BuildUPCRLoadParts(E, ResultType, Ty);
+      return BuildParens(BuildComma(LoadAndVar.first, LoadAndVar.second).get());
+    }
+    // Returns a pair containing the load stmt and a declrefexpr to the
+    // temporary variable created.
+    std::pair<Expr *, Expr *> BuildUPCRLoadParts(Expr * E, QualType ResultType, QualType Ty) {
       int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
       Qualifiers Quals = Ty.getQualifiers();
       bool Phaseless = isPhaseless(Ty);
@@ -360,9 +366,9 @@ namespace {
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
-      return BuildParens(BuildComma(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+      return std::make_pair(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get());
     }
-    ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty) {
+    ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty, bool ReturnValue = true) {
       int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
       Qualifiers Quals = Ty.getQualifiers(); 
       bool Phaseless = isPhaseless(Ty);
@@ -392,7 +398,40 @@ namespace {
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Store = BuildUPCRCall(Accessor, args).get();
-      return BuildParens(BuildComma(SetTmp, Store).get());
+      Expr *CommaRHS = Store;
+      if(ReturnValue) {
+	CommaRHS = BuildComma(Store, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get();
+      }
+      return BuildParens(BuildComma(SetTmp, CommaRHS).get());
+    }
+    ExprResult TransformUnaryOperator(UnaryOperator *E) {
+      QualType ArgType = E->getSubExpr()->getType();
+      if((E->getOpcode() == UO_Deref && isPointerToShared(ArgType)) ||
+	 (E->getOpcode() == UO_AddrOf && isPointerToShared(E->getType()))) {
+	// Strip off * and &.  shared lvalues and pointers-to-shared
+	// have the same representation.
+	return TransformExpr(E->getSubExpr());
+      } else if(ArgType.getQualifiers().hasShared() && E->isIncrementDecrementOp()) {
+	bool Phaseless = isPhaseless(ArgType);
+	QualType PtrType = Phaseless? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
+	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
+	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	Expr * SaveArg = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getSubExpr()).get()).get()).get();
+	std::pair<Expr *, Expr *> Load = BuildUPCRLoadParts(TmpPtr, TransformType(ArgType.getUnqualifiedType()), ArgType);
+	Expr * LoadExpr = Load.first;
+	Expr * LoadVar = Load.second;
+	Expr * NewVal = SemaRef.CreateBuiltinBinOp(SourceLocation(), E->isIncrementOp()?BO_Add:BO_Sub, LoadVar, CreateInteger(SemaRef.Context.IntTy, 1)).get();
+
+	if(E->isPrefix()) {
+	  Expr * Result = BuildUPCRStore(TmpPtr, NewVal, ArgType).get();
+	  return BuildParens(BuildComma(SaveArg, BuildComma(LoadExpr, Result).get()).get());
+	} else {
+	  Expr * Result = BuildUPCRStore(TmpPtr, NewVal, ArgType, false).get();
+	  return BuildParens(BuildComma(SaveArg, BuildComma(LoadExpr, BuildComma(Result, LoadVar).get()).get()).get());
+	}
+      } else {
+	return TreeTransform::TransformUnaryOperator(E);
+      }
     }
     ExprResult TransformBinaryOperator(BinaryOperator *E) {
       // Catch assignment to shared variables
