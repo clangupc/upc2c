@@ -316,8 +316,10 @@ namespace {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
 	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), TransformType(E->getType()), E->getSubExpr()->getType());
       } else {
-	// Otherwise use the default transform
-	return TreeTransform::TransformImplicitCastExpr(E);
+	// We can't use the default transform, because it
+	// strips off all implicit casts.  We may need to
+	// process the subexpression
+	return TransformExpr(E->getSubExpr());
       }
     }
     bool isPointerToShared(QualType Ty) {
@@ -684,12 +686,31 @@ namespace {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? TransformType(FD->getTypeSourceInfo()) : 0;
 	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
 				    FD->getNameInfo(), TransformType(FD->getType()),
-				    TransformType(FD->getTypeSourceInfo()),
+				    FTSI,
 				    FD->getStorageClass(), FD->getStorageClassAsWritten(),
 				    FD->isInlineSpecified(), FD->hasWrittenPrototype(),
 				    FD->isConstexpr());
+	// Copy the parameters
+	SmallVector<ParmVarDecl *, 2> Parms;
+	int i = 0;
+	for(FunctionDecl::param_iterator iter = FD->param_begin(), end = FD->param_end(); iter != end; ++iter) {
+	  ParmVarDecl *OldParam = *iter;
+	  TypeSourceInfo *PTSI = OldParam->getTypeSourceInfo()?TransformType(OldParam->getTypeSourceInfo()):0;
+	  ParmVarDecl *Param = ParmVarDecl::Create(SemaRef.Context, result, OldParam->getLocStart(),
+						   OldParam->getLocation(), OldParam->getIdentifier(),
+						   TransformType(OldParam->getType()),
+						   PTSI,
+						   OldParam->getStorageClass(),
+						   OldParam->getStorageClassAsWritten(),
+						   TransformExpr(OldParam->getDefaultArg()).get());
+	  Param->setScopeInfo(0, i++);
+	  Parms.push_back(Param);
+	}
+	result->setParams(Parms);
+
 	if(FD->doesThisDeclarationHaveABody()) {
 	  SemaRef.ActOnStartOfFunctionDef(0, result);
 	  Sema::SynthesizedFunctionScope Scope(SemaRef, result);
@@ -733,6 +754,36 @@ namespace {
 				  RD->getIdentifier(), cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
 	return TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), TransformType(TD->getTypeSourceInfo()));
+      } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
+	EnumDecl * PrevDecl = 0;
+	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
+	  PrevDecl = cast<EnumDecl>(TransformDecl(SourceLocation(), OrigPrevDecl));
+	}
+
+	EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getLocStart(), ED->getLocation(),
+					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
+					    ED->isScopedUsingClassTag(), ED->isFixed());
+	Result->startDefinition();
+
+	SmallVector<Decl *, 4> Enumerators;
+
+	EnumConstantDecl *PrevEnumConstant = 0;
+	for(EnumDecl::enumerator_iterator iter = ED->enumerator_begin(), end = ED->enumerator_end(); iter != end; ++iter) {
+	  Expr *Value = 0;
+	  if(Expr *OrigValue = iter->getInitExpr()) {
+	    Value = TransformExpr(OrigValue).get();
+	  }
+	  EnumConstantDecl *EnumConstant = SemaRef.CheckEnumConstant(Result, PrevEnumConstant, iter->getLocation(), iter->getIdentifier(), Value);
+
+	  EnumConstant->setAccess(Result->getAccess());
+	  Result->addDecl(EnumConstant);
+	  Enumerators.push_back(EnumConstant);
+	  PrevEnumConstant = EnumConstant;
+
+	}
+
+	SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators.data(), Enumerators.size(), 0, 0);
+	return Result;
       } else {
 	assert(!"Unknown Decl");
       }
