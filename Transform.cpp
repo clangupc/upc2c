@@ -658,11 +658,17 @@ namespace {
       return TmpVar;
     }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
-      return TreeTransform::TransformDecl(Loc, D);
+      if(D == NULL) return NULL;
+      Decl *Result = TreeTransform::TransformDecl(Loc, D);
+      if(Result == D) {
+	Result = TransformDeclaration(D, SemaRef.CurContext);
+	transformedLocalDecl(D, Result);
+      }
+      return Result;
     }
-    Decl *TransformDefinition(SourceLocation Loc, Decl *D) {
-      return TransformDeclaration(D, SemaRef.CurContext);
-    }
+    //Decl *TransformDefinition(SourceLocation Loc, Decl *D) {
+    //  return TransformDeclaration(D, SemaRef.CurContext);
+    //}
     Decl *TransformDeclaration(Decl *D, DeclContext *DC) {
       Decl *Result = TransformDeclarationImpl(D, DC);
       transformedLocalDecl(D, Result);
@@ -693,6 +699,7 @@ namespace {
 				    FD->getStorageClass(), FD->getStorageClassAsWritten(),
 				    FD->isInlineSpecified(), FD->hasWrittenPrototype(),
 				    FD->isConstexpr());
+	transformedLocalDecl(D, result);
 	// Copy the parameters
 	SmallVector<ParmVarDecl *, 2> Parms;
 	int i = 0;
@@ -749,9 +756,28 @@ namespace {
 	  return result;
 	}
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
-	return RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
+	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
 				  RD->getLocStart(), RD->getLocation(),
 				  RD->getIdentifier(), cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
+	transformedLocalDecl(D, Result);
+	SmallVector<Decl *, 4> Fields;
+	if(RD->isThisDeclarationADefinition()) {
+	  Result->startDefinition();
+	  for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
+	    if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
+	      TypeSourceInfo *DI = FD->getTypeSourceInfo();
+	      if(DI) DI = TransformType(DI);
+	      FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(), TransformType(FD->getType()), DI, Result, FD->getLocation(), FD->isMutable(), TransformExpr(FD->getBitWidth()).get(), FD->getInClassInitStyle(), FD->getInnerLocStart(), FD->getAccess(), 0);
+	      
+	      NewFD->setImplicit(FD->isImplicit());
+	      NewFD->setAccess(FD->getAccess());
+	      Result->addDecl(NewFD);
+	      Fields.push_back(NewFD);
+	    }
+	  }
+	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
+	}
+	return Result;
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
 	return TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), TransformType(TD->getTypeSourceInfo()));
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
@@ -763,6 +789,7 @@ namespace {
 	EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getLocStart(), ED->getLocation(),
 					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
 					    ED->isScopedUsingClassTag(), ED->isFixed());
+	transformedLocalDecl(D, Result);
 	Result->startDefinition();
 
 	SmallVector<Decl *, 4> Enumerators;
