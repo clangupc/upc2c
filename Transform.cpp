@@ -30,6 +30,8 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * upcr_startup_shalloc;
+    FunctionDecl * upcr_put_pshared;
+    FunctionDecl * upcr_put_shared;
     FunctionDecl * UPCR_GET_PSHARED;
     FunctionDecl * UPCR_PUT_PSHARED;
     FunctionDecl * UPCR_GET_SHARED;
@@ -96,6 +98,16 @@ namespace {
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
 	upcr_hasMyAffinity_shared = CreateFunction(Context, "upcr_hasMyAffinity_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_put_pshared
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
+	upcr_put_pshared = CreateFunction(Context, "upcr_put_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_put_shared
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
+	upcr_put_shared = CreateFunction(Context, "upcr_put_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_PSHARED
       {
@@ -263,6 +275,9 @@ namespace {
     }
     ExprResult BuildUPCRDeclRef(VarDecl *VD) {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation());
+    }
+    Expr * CreateSimpleDeclRef(VarDecl *VD) {
+      return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()).get();
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       Expr *ID = S->getIdValue();
@@ -745,6 +760,9 @@ namespace {
 					    VD->getLocation(), VD->getIdentifier(),
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass(), VD->getStorageClassAsWritten());
 	  SharedGlobals.push_back(std::make_pair(result, VD));
+	  if(Expr *Init = VD->getInit()) {
+	    SharedInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
+	  }
 	  return result;
 	} else {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
@@ -821,7 +839,12 @@ namespace {
       SemaRef.setCurScope(&CurScope);
       SemaRef.PushDeclContext(&CurScope, result);
       CopyDeclContext(D, result);
-      result->addDecl(GetInitialization());
+      if(FunctionDecl *Alloc = GetSharedAllocationFunction()) {
+	result->addDecl(Alloc);
+      }
+      if(FunctionDecl *Init = GetSharedInitializationFunction()) {
+	result->addDecl(Init);
+      }
       SemaRef.setCurScope(0);
       return result;
     }
@@ -841,7 +864,7 @@ namespace {
     // have been processed
     typedef std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobalsType;
     std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobals;
-    FunctionDecl* GetInitialization() {
+    FunctionDecl* GetSharedAllocationFunction() {
       // FIXME: randomize (?) the name
       FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_ALLOC_test", SemaRef.Context.VoidTy, 0, 0);
       SemaRef.ActOnStartOfFunctionDef(0, Result);
@@ -928,6 +951,65 @@ namespace {
 	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, PInitializers.size()), SemaRef.Context.getSizeType(), SourceLocation()));
 	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_pshalloc, args).get());
 	}
+	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
+      }
+      SemaRef.ActOnFinishFunctionBody(Result, Body.get());
+      return Result;
+    }
+
+    Stmt *CreateSimpleDeclStmt(Decl * D) {
+      Decl *Decls[] = { D };
+      return SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, Decls, 1)), SourceLocation(), SourceLocation()).get();
+    }
+
+    typedef std::vector<std::pair<VarDecl *, Expr *> > SharedInitializersType;
+    SharedInitializersType SharedInitializers;
+    FunctionDecl * GetSharedInitializationFunction() {
+      // FIXME: randomize (?) the name
+      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_INIT_test", SemaRef.Context.VoidTy, 0, 0);
+      SemaRef.ActOnStartOfFunctionDef(0, Result);
+      Sema::SynthesizedFunctionScope Scope(SemaRef, Result);
+      StmtResult Body;
+      {
+	Sema::CompoundScopeRAII BodyScope(SemaRef);
+	SmallVector<Stmt*, 8> Statements;
+	{
+	  std::vector<Expr*> args;
+	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	}
+	
+	Expr *Cond;
+	{
+	  std::vector<Expr*> args;
+	  Expr *mythread = BuildUPCRCall(Decls->upcr_mythread, args).get();
+	  Cond = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, mythread, CreateInteger(SemaRef.Context.IntTy, 0)).get();
+	}
+
+	std::vector<VarDecl *> Initializers;
+	for(SharedInitializersType::iterator iter = SharedInitializers.begin(), end = SharedInitializers.end(); iter != end; ++iter) {
+	  std::string VarName = (Twine("_bupc_") + iter->first->getIdentifier()->getName() + "_val").str();
+	  VarDecl *StoredInit = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(VarName),
+						iter->second->getType(), SemaRef.Context.getTrivialTypeSourceInfo(iter->second->getType()),
+						SC_Auto, SC_None);
+	  StoredInit->setInit(iter->second);
+	  Initializers.push_back(StoredInit);
+	  Statements.push_back(CreateSimpleDeclStmt(StoredInit));
+	}
+	
+	{
+	  SmallVector<Stmt*, 8> PutOnce;
+	  for(std::size_t i = 0; i < SharedInitializers.size(); ++i) {
+	    std::vector<Expr*> args;
+	    args.push_back(CreateSimpleDeclRef(SharedInitializers[i].first));
+	    args.push_back(CreateInteger(SemaRef.Context.IntTy, 0));
+	    args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
+	    args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
+	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
+	    PutOnce.push_back(BuildUPCRCall(Phaseless?Decls->upcr_put_pshared:Decls->upcr_put_shared, args).get());
+	  }
+	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
+	}
+
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
       SemaRef.ActOnFinishFunctionBody(Result, Body.get());
