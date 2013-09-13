@@ -1034,6 +1034,30 @@ namespace {
       Decl *Result = Trans.TransformTranslationUnitDecl(top);
       std::string error;
       llvm::raw_fd_ostream OS(filename.c_str(), error);
+      OS << "#include <upcr.h>\n";
+      OS << "#include <upcr_proxy.h>\n";
+
+      OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
+	"#define UPCR_TRANS_EXTRA_INCL\n"
+	"extern int upcrt_gcd (int _a, int _b);\n"
+	"extern int _upcrt_forall_start(int _start_thread, int _step, int _lo, int _scale);\n"
+	"#define upcrt_forall_start(start_thread, step, lo, scale)  \\\n"
+	"       _upcrt_forall_start(start_thread, step, lo, scale)\n"
+	"int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n"
+	"#define upcr_forall_control upcrt_forall_control\n"
+	"#ifndef UPCR_EXIT_FUNCTION\n"
+	"#define UPCR_EXIT_FUNCTION() ((void)0)\n"
+	"#endif\n"
+	"#if UPCR_RUNTIME_SPEC_MAJOR > 3 || (UPCR_RUNTIME_SPEC_MAJOR == 3 && UPCR_RUNTIME_SPEC_MINOR >= 8)\n"
+	"  #define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
+	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads), (elemsz), #sptr, (typestr) }\n"
+	"#else\n"
+	"  #define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
+	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads) }\n"
+	"#endif\n"
+	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
+	"#endif\n";
+
       Result->print(OS);
     }
     void InitializeSema(Sema& SemaRef) { S = &SemaRef; }
