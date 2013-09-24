@@ -231,17 +231,17 @@ namespace {
       // upcr_forall_control
       {
 	DeclContext *DC = Context.getTranslationUnitDecl();
-	upcr_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern, SC_Extern);
+	upcr_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern);
       }
 
     }
     FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
       DeclContext *DC = Context.getTranslationUnitDecl();
-      QualType Ty = Context.getFunctionType(RetType, argTypes, numArgs, FunctionProtoType::ExtProtoInfo());
-      FunctionDecl *Result = FunctionDecl::Create(Context, DC, FakeLocation, FakeLocation, DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty));
+      QualType Ty = Context.getFunctionType(RetType, llvm::makeArrayRef(argTypes, numArgs), FunctionProtoType::ExtProtoInfo());
+      FunctionDecl *Result = FunctionDecl::Create(Context, DC, FakeLocation, FakeLocation, DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty), SC_Extern);
       llvm::SmallVector<ParmVarDecl *, 4> Params;
       for(int i = 0; i < numArgs; ++i) {
-	Params.push_back(ParmVarDecl::Create(Context, Result, SourceLocation(), SourceLocation(), 0, argTypes[i], 0, SC_None, SC_None, 0));
+	Params.push_back(ParmVarDecl::Create(Context, Result, SourceLocation(), SourceLocation(), 0, argTypes[i], 0, SC_None, 0));
 	Params[i]->setScopeInfo(0, i);
       }
       Result->setParams(Params);
@@ -673,7 +673,7 @@ namespace {
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
       std::string name = (llvm::Twine("_bupc_spilld") + llvm::Twine(ID)).str();
-      VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(name), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_Auto, SC_None);
+      VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(name), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_None);
       LocalTemps.push_back(TmpVar);
       return TmpVar;
     }
@@ -716,7 +716,7 @@ namespace {
 	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
 				    FD->getNameInfo(), TransformType(FD->getType()),
 				    FTSI,
-				    FD->getStorageClass(), FD->getStorageClassAsWritten(),
+				    FD->getStorageClass(),
 				    FD->isInlineSpecified(), FD->hasWrittenPrototype(),
 				    FD->isConstexpr());
 	transformedLocalDecl(D, result);
@@ -731,7 +731,6 @@ namespace {
 						   TransformType(OldParam->getType()),
 						   PTSI,
 						   OldParam->getStorageClass(),
-						   OldParam->getStorageClassAsWritten(),
 						   TransformExpr(OldParam->getDefaultArg()).get());
 	  Param->setScopeInfo(0, i++);
 	  Parms.push_back(Param);
@@ -741,21 +740,26 @@ namespace {
 	if(FD->doesThisDeclarationHaveABody()) {
 	  SemaRef.ActOnStartOfFunctionDef(0, result);
 	  Sema::SynthesizedFunctionScope Scope(SemaRef, result);
-	  Stmt *UserBody = TransformStmt(FD->getBody()).get();
-	  llvm::SmallVector<Stmt*, 8> Body;
+	  Stmt *FnBody;
 	  {
-	    std::vector<Expr*> args;
-	    Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	    Sema::CompoundScopeRAII BodyScope(SemaRef);
+	    Stmt *UserBody = TransformStmt(FD->getBody()).get();
+	    llvm::SmallVector<Stmt*, 8> Body;
+	    {
+	      std::vector<Expr*> args;
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	    }
+	    // Insert all the temporary variables that we created
+	    for(std::vector<VarDecl*>::const_iterator iter = LocalTemps.begin(), end = LocalTemps.end(); iter != end; ++iter) {
+	      Decl *decl_arr[] = { *iter };
+	      Body.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, decl_arr, 1)), SourceLocation(), SourceLocation()).get());
+	    }
+	    LocalTemps.clear();
+	    // Insert the user code
+	    Body.push_back(UserBody);
+	    FnBody = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get();
 	  }
-	  // Insert all the temporary variables that we created
-	  for(std::vector<VarDecl*>::const_iterator iter = LocalTemps.begin(), end = LocalTemps.end(); iter != end; ++iter) {
-	    Decl *decl_arr[] = { *iter };
-	    Body.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, decl_arr, 1)), SourceLocation(), SourceLocation()).get());
-	  }
-	  LocalTemps.clear();
-	  // Insert the user code
-	  Body.push_back(UserBody);
-	  SemaRef.ActOnFinishFunctionBody(result, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get());
+	  SemaRef.ActOnFinishFunctionBody(result, FnBody);
 	}
 	return result;
       } else if(VarDecl *VD = dyn_cast<VarDecl>(D)) {
@@ -763,7 +767,7 @@ namespace {
 	  QualType VarType = (isPhaseless(VD->getType())? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t );
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(),
 					    VD->getLocation(), VD->getIdentifier(),
-					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass(), VD->getStorageClassAsWritten());
+					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  if(Expr *Init = VD->getInit()) {
 	    SharedInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
@@ -772,7 +776,7 @@ namespace {
 	} else {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
-					    VD->getStorageClass(), VD->getStorageClassAsWritten());
+					    VD->getStorageClass());
 	  if(Expr *Init = VD->getInit()) {
 	    result->setInit(TransformExpr(Init).get());
 	  }
@@ -832,7 +836,7 @@ namespace {
 
 	}
 
-	SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators.data(), Enumerators.size(), 0, 0);
+	SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators, 0, 0);
 	return Result;
       } else {
 	assert(!"Unknown Decl");
@@ -930,7 +934,7 @@ namespace {
 	VarDecl *_bupc_pinfo;
 	if(!Initializers.empty()) {
 	  _bupc_info = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
-						 &SemaRef.Context.Idents.get("_bupc_info"), _bupc_info_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_info_type), SC_Auto, SC_None);
+						 &SemaRef.Context.Idents.get("_bupc_info"), _bupc_info_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_info_type), SC_None);
 	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
 	  SemaRef.AddInitializerToDecl(_bupc_info, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false, false);
 	  Decl *_bupc_info_arr[] = { _bupc_info };
@@ -938,7 +942,7 @@ namespace {
 	}
 	if(!PInitializers.empty()) {
 	  _bupc_pinfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
-						 &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_Auto, SC_None);
+						 &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_None);
 	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
 	  SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, PInitializers, Decls->FakeLocation).get(), false, false);
 	  Decl *_bupc_pinfo_arr[] = { _bupc_pinfo };
@@ -995,7 +999,7 @@ namespace {
 	  std::string VarName = (Twine("_bupc_") + iter->first->getIdentifier()->getName() + "_val").str();
 	  VarDecl *StoredInit = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(VarName),
 						iter->second->getType(), SemaRef.Context.getTrivialTypeSourceInfo(iter->second->getType()),
-						SC_Auto, SC_None);
+						SC_None);
 	  StoredInit->setInit(iter->second);
 	  Initializers.push_back(StoredInit);
 	  Statements.push_back(CreateSimpleDeclStmt(StoredInit));
