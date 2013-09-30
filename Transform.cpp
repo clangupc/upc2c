@@ -261,7 +261,7 @@ namespace {
 
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
   public:
-    RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), Decls(D) {
+    RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), AnonRecordID(0), Decls(D) {
     }
     bool AlwaysRebuild() { return true; }
     ExprResult BuildParens(Expr * E) {
@@ -283,6 +283,17 @@ namespace {
     }
     Expr * CreateSimpleDeclRef(VarDecl *VD) {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()).get();
+    }
+    int AnonRecordID;
+    IdentifierInfo *getRecordDeclName(IdentifierInfo * OrigName) {
+      // HACK: Anonymous structs aren't passed through correctly in clang <= 3.3
+      //       This may be fixed in the 3.4.
+      if(OrigName) {
+	return OrigName;
+      } else {
+	std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
+	return &SemaRef.Context.Idents.get(Name);
+      }
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       Expr *ID = S->getIdValue();
@@ -783,9 +794,10 @@ namespace {
 	  return result;
 	}
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
+	IdentifierInfo *Name = getRecordDeclName(RD->getIdentifier());
 	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
 				  RD->getLocStart(), RD->getLocation(),
-				  RD->getIdentifier(), cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
+				  Name, cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
 	transformedLocalDecl(D, Result);
 	SmallVector<Decl *, 4> Fields;
 	if(RD->isThisDeclarationADefinition()) {
@@ -842,12 +854,37 @@ namespace {
 	assert(!"Unknown Decl");
       }
     }
+    std::set<StringRef> CollectedIncludes;
+    void PrintIncludes(llvm::raw_ostream& OS) {
+      for(std::set<StringRef>::iterator iter = CollectedIncludes.begin(), end = CollectedIncludes.end(); iter != end; ++iter) {
+	OS << "#include <" << *iter << ">\n";
+      }
+    }
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
       TranslationUnitDecl *result = SemaRef.Context.getTranslationUnitDecl();
       Scope CurScope(0, Scope::DeclScope, SemaRef.getDiagnostics());
       SemaRef.setCurScope(&CurScope);
       SemaRef.PushDeclContext(&CurScope, result);
-      CopyDeclContext(D, result);
+
+      // Process all Decls
+      for(DeclContext::decl_iterator iter = D->decls_begin(),
+          end = D->decls_end(); iter != end; ++iter) {
+	Decl *decl = TransformDeclaration(*iter, result);
+	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
+	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
+	// Don't output Decls declared in system headers
+	if(Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc)) {
+	  result->addDecl(decl);
+        } else {
+	  // Record all system headers that aren't
+	  // included by other system headers
+	  SourceLocation IncludeLoc = SrcManager.getIncludeLoc(SrcManager.getFileID(Loc));
+	  if(IncludeLoc.isInvalid() || !SrcManager.isInSystemHeader(IncludeLoc)) {
+	    CollectedIncludes.insert(SrcManager.getFilename(Loc));
+	  }
+	}
+      }
+
       if(FunctionDecl *Alloc = GetSharedAllocationFunction()) {
 	result->addDecl(Alloc);
       }
@@ -858,12 +895,6 @@ namespace {
       return result;
     }
     UPCRDecls *Decls;
-    void CopyDeclContext(DeclContext *Src, DeclContext *Dst) {
-      for(DeclContext::decl_iterator iter = Src->decls_begin(),
-          end = Src->decls_end(); iter != end; ++iter) {
-	Dst->addDecl(TransformDeclaration(*iter, Dst));
-      }
-    }
     std::vector<VarDecl*> LocalTemps;
     // The shared variables that need to be initialized
     // all must have type upcr_shared_ptr_t
@@ -1045,6 +1076,8 @@ namespace {
       llvm::raw_fd_ostream OS(filename.c_str(), error);
       OS << "#include <upcr.h>\n";
       OS << "#include <upcr_proxy.h>\n";
+
+      Trans.PrintIncludes(OS);
 
       OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
 	"#define UPCR_TRANS_EXTRA_INCL\n"
