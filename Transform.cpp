@@ -121,7 +121,7 @@ namespace {
       }
       // UPCR_PUT_PSHARED
       {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
 	UPCR_PUT_PSHARED = CreateFunction(Context, "UPCR_PUT_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_SHARED
@@ -131,7 +131,7 @@ namespace {
       }
       // UPCR_PUT_SHARED
       {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
 	UPCR_PUT_SHARED = CreateFunction(Context, "UPCR_PUT_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_PSHARED_STRICT
@@ -141,7 +141,7 @@ namespace {
       }
       // UPCR_PUT_PSHARED_STRICT
       {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
 	UPCR_PUT_PSHARED_STRICT = CreateFunction(Context, "UPCR_PUT_PSHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_SHARED_STRICT
@@ -151,7 +151,7 @@ namespace {
       }
       // UPCR_PUT_SHARED_STRICT
       {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.VoidPtrTy, Context.IntTy, Context.IntTy };
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
 	UPCR_PUT_SHARED_STRICT = CreateFunction(Context, "UPCR_PUT_SHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_SHARED
@@ -262,6 +262,12 @@ namespace {
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), AnonRecordID(0), Decls(D) {
+      UPCSystemHeaders.insert("upc.h");
+      UPCSystemHeaders.insert("upc_collective.h");
+      UPCSystemHeaders.insert("upc-lib.h");
+      UPCSystemHeaders.insert("upc_relaxed.h");
+      UPCSystemHeaders.insert("upc_strict.h");
+      UPCSystemHeaders.insert("upc_tick.h");
     }
     bool AlwaysRebuild() { return true; }
     ExprResult BuildParens(Expr * E) {
@@ -397,7 +403,7 @@ namespace {
       // offset
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
       // size
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(E->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
       return std::make_pair(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get());
     }
@@ -421,15 +427,15 @@ namespace {
 	  Accessor = Decls->UPCR_PUT_SHARED;
 	}
       }
-      VarDecl *TmpVar = CreateTmpVar(RHS->getType());
+      VarDecl *TmpVar = CreateTmpVar(Ty.getUnqualifiedType());
       Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
       std::vector<Expr*> args;
       args.push_back(LHS);
-      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
       // offset
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
       // size
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(RHS->getType()).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Store = BuildUPCRCall(Accessor, args).get();
       Expr *CommaRHS = Store;
       if(ReturnValue) {
@@ -723,9 +729,14 @@ namespace {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+	DeclarationNameInfo FnName = FD->getNameInfo();
+	if(FnName.getName() == &SemaRef.Context.Idents.get("main")) {
+	  FnName.setName(&SemaRef.Context.Idents.get("user_main"));
+	}
+
 	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? TransformType(FD->getTypeSourceInfo()) : 0;
 	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
-				    FD->getNameInfo(), TransformType(FD->getType()),
+				    FnName, TransformType(FD->getType()),
 				    FTSI,
 				    FD->getStorageClass(),
 				    FD->isInlineSpecified(), FD->hasWrittenPrototype(),
@@ -860,6 +871,19 @@ namespace {
 	OS << "#include <" << *iter << ">\n";
       }
     }
+    bool TreatAsCHeader(SourceLocation Loc) {
+      if(Loc.isInvalid()) return false;
+      SourceManager& SrcManager = SemaRef.Context.getSourceManager();
+      StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
+      return UPCSystemHeaders.find(Name) == UPCSystemHeaders.end() &&
+	SrcManager.isInSystemHeader(Loc);
+    }
+    bool IsUPC_H(SourceLocation Loc) {
+      SourceManager& SrcManager = SemaRef.Context.getSourceManager();
+      StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
+      return Name == "upc.h";
+    }
+    std::set<StringRef> UPCSystemHeaders;
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
       TranslationUnitDecl *result = SemaRef.Context.getTranslationUnitDecl();
       Scope CurScope(0, Scope::DeclScope, SemaRef.getDiagnostics());
@@ -873,14 +897,24 @@ namespace {
 	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
 	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
 	// Don't output Decls declared in system headers
-	if(Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc)) {
-	  result->addDecl(decl);
+	if(!TreatAsCHeader(Loc)) {
+	  // Skip the contents of upc.h, because they're
+	  // declared in upcr_proxy.h
+	  if(!IsUPC_H(Loc)) {
+	    result->addDecl(decl);
+	  }
         } else {
-	  // Record all system headers that aren't
-	  // included by other system headers
-	  SourceLocation IncludeLoc = SrcManager.getIncludeLoc(SrcManager.getFileID(Loc));
-	  if(IncludeLoc.isInvalid() || !SrcManager.isInSystemHeader(IncludeLoc)) {
-	    CollectedIncludes.insert(SrcManager.getFilename(Loc));
+	  // Record the system headers included by user code
+	  SourceLocation HeaderLoc;
+	  SourceLocation IncludeLoc = Loc;
+	  do {
+	    HeaderLoc = IncludeLoc;
+	    IncludeLoc = SrcManager.getIncludeLoc(SrcManager.getFileID(HeaderLoc));
+	  } while(TreatAsCHeader(IncludeLoc));
+
+	  StringRef Name = SrcManager.getFilename(HeaderLoc);
+	  if(!Name.empty()) {
+	    CollectedIncludes.insert(Name);
 	  }
 	}
       }
