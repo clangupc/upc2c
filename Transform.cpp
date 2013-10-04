@@ -349,6 +349,22 @@ namespace {
       Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
       return SemaRef.Owned(result);
     }
+    ExprResult TransformInitializer(Expr *Init, bool CXXDirectInit) {
+      if(!Init)
+	return SemaRef.Owned(Init);
+
+      // Have to handle this separately, as TreeTransform
+      // strips off ImplicitCastExprs in TransformInitializer.
+      if(ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Init)) {
+	if(ICE->getCastKind() == CK_LValueToRValue && ICE->getSubExpr()->getType().getQualifiers().hasShared()) {
+	  return TransformExpr(ICE);
+	} else {
+	  return TransformInitializer(ICE->getSubExpr(), CXXDirectInit);
+	}
+      }
+
+      return TreeTransform::TransformInitializer(Init, CXXDirectInit);
+    }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
 	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), TransformType(E->getType()), E->getSubExpr()->getType());
