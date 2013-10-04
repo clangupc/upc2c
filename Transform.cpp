@@ -1135,44 +1135,6 @@ namespace {
 	"#endif\n";
 
       Result->print(OS);
-
-      OS << "GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_GASNetConfig_gen, \n"
-	" \"$GASNetConfig: (/tmp/upcc-Steven-9439-1378912456/test.trans.c) RELEASE=1.20.2,SPEC=1.8,CONDUIT=SMP(SMP-1.10/SMP-1.1),THREADMODEL=SEQ,SEGMENT=FAST,PTR=64bit,noalign,pshm,nodebug,notrace,nostats,nodebugmalloc,nosrclines,timers_native,membars_native,atomics_native,atomic32_native,atomic64_native $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_UPCRConfig_gen,\n"
-	" \"$UPCRConfig: (/tmp/upcc-Steven-9439-1378912456/test.trans.c) VERSION=2.16.2,PLATFORMENV=shared,SHMEM=pshm,SHAREDPTRREP=packed/p20:t10:a34,TRANS=berkeleyupc,nodebug,nogasp,notv,dynamicthreads $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_translatetime, \n"
-	" \"$UPCTranslateTime: (test.o) Wed Sep 11 11:14:16 2013 $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_GASNetConfig_obj, \n"
-	" \"$GASNetConfig: (test.o) \" GASNET_CONFIG_STRING \" $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_UPCRConfig_obj,\n"
-	" \"$UPCRConfig: (test.o) \" UPCR_CONFIG_STRING UPCRI_THREADCONFIG_STR \" $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_translator, \n"
-	" \"$UPCTranslator: (test.o) /usr/local/targ (GCCUPC2) $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_upcver, \n"
-	" \"$UPCVersion: (test.o) 2.16.2 $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_compileline, \n"
-	" \"$UPCCompileLine: (test.o) /usr/local/opt/bin/upcc.pl -trans test.upc $\");\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_compiletime, \n"
-	" \"$UPCCompileTime: (test.o) \" __DATE__ \" \" __TIME__ \" $\");\n"
-	"#ifndef UPCRI_CC /* ensure backward compatilibity for http netcompile */\n"
-	"#define UPCRI_CC <unknown>\n"
-	"#endif\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_backendcompiler, \n"
-	" \"$UPCRBackendCompiler: (test.o) \" _STRINGIFY(UPCRI_CC) \" $\");\n"
-	"\n"
-	"#ifdef GASNETT_CONFIGURE_MISMATCH\n"
-	"  GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_configuremismatch, \n"
-	"   \"$UPCRConfigureMismatch: (test.o) 1 $\");\n"
-	"  GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_configuredcompiler, \n"
-	"   \"$UPCRConfigureCompiler: (test.o) \" GASNETT_PLATFORM_COMPILER_IDSTR \" $\");\n"
-	"  GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_buildcompiler, \n"
-	"   \"$UPCRBuildCompiler: (test.o) \" PLATFORM_COMPILER_IDSTR \" $\");\n"
-	"#endif\n"
-	"\n"
-	"/**************************************************************************/\n"
-	"GASNETT_IDENT(UPCRI_IdentString_test_o_1378912456_transver_2,\n"
-	" \"$UPCTranslatorVersion: (test.o) 2.16.2, built on Aug 19 2013 at 15:04:33, host GCCUPC2 linux-x86_64/64, gcc v4.5.1 20100924 (Red Hat 4.5.1-4) $\");\n";
-      
     }
     void InitializeSema(Sema& SemaRef) { S = &SemaRef; }
     void ForgetSema() { S = 0; }
