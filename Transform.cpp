@@ -674,6 +674,24 @@ namespace {
 	return TreeTransform::TransformArraySubscriptExpr(E);
       }
     }
+    ExprResult TransformMemberExpr(MemberExpr *E) {
+      Expr *Base = E->getBase();
+      QualType BaseType = Base->getType();
+      if(const PointerType *PT = BaseType->getAs<PointerType>()) {
+	BaseType = PT->getPointeeType();
+      }
+      if(BaseType.getQualifiers().hasShared()) {
+	ValueDecl * FD = cast<ValueDecl>(TransformDecl(E->getMemberLoc(), E->getMemberDecl()));
+	uint64_t Offset = SemaRef.Context.getFieldOffset(FD);
+	std::vector<Expr *> args;
+	args.push_back(TransformExpr(Base).get());
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), 1));
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset));
+	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+      } else {
+	return TreeTransform::TransformMemberExpr(E);
+      }
+    }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
       // Transform the initialization statement
       StmtResult Init = getDerived().TransformStmt(S->getInit());
@@ -883,7 +901,7 @@ namespace {
 	      TypeSourceInfo *DI = FD->getTypeSourceInfo();
 	      if(DI) DI = TransformType(DI);
 	      FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(), TransformType(FD->getType()), DI, Result, FD->getLocation(), FD->isMutable(), TransformExpr(FD->getBitWidth()).get(), FD->getInClassInitStyle(), FD->getInnerLocStart(), FD->getAccess(), 0);
-	      
+	      transformedLocalDecl(FD, NewFD);
 	      NewFD->setImplicit(FD->isImplicit());
 	      NewFD->setAccess(FD->getAccess());
 	      Result->addDecl(NewFD);
