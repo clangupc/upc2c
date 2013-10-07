@@ -301,6 +301,48 @@ namespace {
 	return &SemaRef.Context.Idents.get(Name);
       }
     }
+    struct ArrayDimensionT {
+      ArrayDimensionT(ASTContext& Context) :
+	ArrayDimension(Context.getTypeSize(Context.getSizeType()), 1),
+	HasThread(false),
+	ElementSize(0)
+      {}
+      llvm::APInt ArrayDimension;
+      bool HasThread;
+      int ElementSize;
+    };
+    ArrayDimensionT GetArrayDimension(QualType Ty) {
+      ArrayDimensionT Result(SemaRef.Context);
+      QualType ElemTy = Ty.getCanonicalType();
+      while(const ArrayType *AT = dyn_cast<ArrayType>(ElemTy.getTypePtr())) {
+	if(const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+	  Result.ArrayDimension *= CAT->getSize();
+	} else if(const UPCThreadArrayType *TAT = dyn_cast<UPCThreadArrayType>(AT)) {
+	  if(TAT->getThread()) {
+	    Result.HasThread = true;
+	  }
+	  Result.ArrayDimension *= TAT->getSize();
+	} else {
+	  assert(!"Other array types should not syntax check");
+	}
+	ElemTy = AT->getElementType();
+      }
+      Result.ElementSize = SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity();
+      return Result;
+    }
+    ExprResult MaybeAdjustForArray(const ArrayDimensionT & Dims, Expr * E, BinaryOperatorKind Op) {
+      if(Dims.ArrayDimension == 1 && !Dims.HasThread) {
+	return SemaRef.Owned(E);
+      } else {
+	Expr *Dimension = IntegerLiteral::Create(SemaRef.Context, Dims.ArrayDimension, SemaRef.Context.getSizeType(), SourceLocation());
+	if(Dims.HasThread) {
+	  std::vector<Expr*> args;
+	  Expr *Threads = BuildUPCRCall(Decls->upcr_threads, args).get();
+	  Dimension = BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Dimension, Threads).get()).get();
+	}
+	return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, E, Dimension).get());
+      }
+    }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       Expr *ID = S->getIdValue();
       std::vector<Expr*> args;
@@ -501,27 +543,32 @@ namespace {
 	bool RHSIsShared = isPointerToShared(E->getRHS()->getType());
 	if(LHSIsShared && RHSIsShared && E->getOpcode() == BO_Sub) {
 	  // Pointer - Pointer
+	  ExprResult Result;
 	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
-	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  ArrayDimensionT Dims = GetArrayDimension(PointeeType);
+	  int ElementSize = Dims.ElementSize;
 	  std::vector<Expr*> args;
 	  args.push_back(TransformExpr(LHS).get());
 	  args.push_back(TransformExpr(RHS).get());
 	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
 	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	  if(LayoutQualifier == 0) {
-	    return BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args);
+	    Result = BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args);
 	  } else if(LayoutQualifier == 1) {
-	    return BuildUPCRCall(Decls->UPCR_SUB_PSHARED1, args);
+	    Result = BuildUPCRCall(Decls->UPCR_SUB_PSHARED1, args);
 	  } else {
 	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
-	    return BuildUPCRCall(Decls->UPCR_SUB_SHARED, args);
+	    Result = BuildUPCRCall(Decls->UPCR_SUB_SHARED, args);
 	  }
+	  return MaybeAdjustForArray(Dims, Result.get(), BO_Div);
 	} else if((LHSIsShared || RHSIsShared) && (E->getOpcode() == BO_Add || E->getOpcode() == BO_Sub)) {
 	  // Pointer +/- Integer
 	  if(RHSIsShared) { std::swap(LHS, RHS); }
 	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
-	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  ArrayDimensionT Dims = GetArrayDimension(PointeeType);
+	  int ElementSize = Dims.ElementSize;
 	  Expr *IntVal = TransformExpr(RHS).get();
+	  IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
 	  if(E->getOpcode() == BO_Sub) {
 	    IntVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, IntVal).get();
 	  }
@@ -606,8 +653,10 @@ namespace {
 	Expr *LHS = E->getBase();
 	Expr *RHS = E->getIdx();
 	QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
-	int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	ArrayDimensionT Dims = GetArrayDimension(PointeeType);
+	int ElementSize = Dims.ElementSize;
 	Expr *IntVal = TransformExpr(RHS).get();
+	IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
 	std::vector<Expr*> args;
 	args.push_back(TransformExpr(LHS).get());
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
