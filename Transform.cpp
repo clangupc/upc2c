@@ -55,6 +55,8 @@ namespace {
     FunctionDecl * UPCR_ISEQUAL_SHARED_PSHARED;
     FunctionDecl * UPCR_ISEQUAL_PSHARED_SHARED;
     FunctionDecl * UPCR_ISEQUAL_PSHARED_PSHARED;
+    FunctionDecl * UPCR_PSHARED_TO_LOCAL;
+    FunctionDecl * UPCR_SHARED_TO_LOCAL;
     VarDecl * upcr_forall_control;
     QualType upcr_shared_ptr_t;
     QualType upcr_pshared_ptr_t;
@@ -203,6 +205,16 @@ namespace {
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t };
 	UPCR_ISEQUAL_PSHARED_PSHARED = CreateFunction(Context, "UPCR_ISEQUAL_PSHARED_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SHARED_TO_LOCAL
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t };
+	UPCR_SHARED_TO_LOCAL = CreateFunction(Context, "UPCR_SHARED_TO_LOCAL", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PSHARED_TO_LOCAL
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t };
+	UPCR_PSHARED_TO_LOCAL = CreateFunction(Context, "UPCR_PSHARED_TO_LOCAL", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -407,10 +419,22 @@ namespace {
 
       return TreeTransform::TransformInitializer(Init, CXXDirectInit);
     }
+    ExprResult TransformCStyleCastExpr(CStyleCastExpr *E) {
+      ExprResult UPCCast = MaybeTransformUPCRCast(E);
+      if(!UPCCast.isInvalid()) {
+	return UPCCast;
+      } else {
+	return TreeTransform::TransformCStyleCastExpr(E);
+      }
+    }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
 	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), TransformType(E->getType()), E->getSubExpr()->getType());
       } else {
+	ExprResult UPCCast = MaybeTransformUPCRCast(E);
+	if(!UPCCast.isInvalid()) {
+	  return UPCCast;
+	}
 	// We can't use the default transform, because it
 	// strips off all implicit casts.  We may need to
 	// process the subexpression
@@ -464,6 +488,18 @@ namespace {
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
       return std::make_pair(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get());
+    }
+    ExprResult MaybeTransformUPCRCast(CastExpr *E) {
+      if(E->getCastKind() == CK_UPCSharedToLocal) {
+	bool Phaseless = isPhaseless(E->getSubExpr()->getType()->getAs<PointerType>()->getPointeeType());
+	FunctionDecl *Accessor = Phaseless? Decls->UPCR_PSHARED_TO_LOCAL : Decls->UPCR_SHARED_TO_LOCAL;
+	std::vector<Expr*> args;
+	args.push_back(TransformExpr(E->getSubExpr()).get());
+	ExprResult Result = BuildUPCRCall(Accessor, args);
+	TypeSourceInfo *Ty = SemaRef.Context.getTrivialTypeSourceInfo(TransformType(E->getType()));
+	return SemaRef.BuildCStyleCastExpr(SourceLocation(), Ty, SourceLocation(), Result.get());
+      }
+      return ExprError();
     }
     ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty, bool ReturnValue = true) {
       int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
