@@ -970,6 +970,7 @@ namespace {
 	    Value = TransformExpr(OrigValue).get();
 	  }
 	  EnumConstantDecl *EnumConstant = SemaRef.CheckEnumConstant(Result, PrevEnumConstant, iter->getLocation(), iter->getIdentifier(), Value);
+	  transformedLocalDecl(*iter, EnumConstant);
 
 	  EnumConstant->setAccess(Result->getAccess());
 	  Result->addDecl(EnumConstant);
