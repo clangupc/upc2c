@@ -57,7 +57,11 @@ namespace {
     FunctionDecl * UPCR_ISEQUAL_PSHARED_PSHARED;
     FunctionDecl * UPCR_PSHARED_TO_LOCAL;
     FunctionDecl * UPCR_SHARED_TO_LOCAL;
+    FunctionDecl * UPCR_ISNULL_PSHARED;
+    FunctionDecl * UPCR_ISNULL_SHARED;
     VarDecl * upcr_forall_control;
+    VarDecl * upcr_null_shared;
+    VarDecl * upcr_null_pshared;
     QualType upcr_shared_ptr_t;
     QualType upcr_pshared_ptr_t;
     QualType upcr_startup_shalloc_t;
@@ -216,6 +220,16 @@ namespace {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
 	UPCR_PSHARED_TO_LOCAL = CreateFunction(Context, "UPCR_PSHARED_TO_LOCAL", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+      // UPCR_ISNULL_SHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t };
+	UPCR_ISNULL_SHARED = CreateFunction(Context, "UPCR_ISNULL_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_ISNULL_PSHARED
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t };
+	UPCR_ISNULL_PSHARED = CreateFunction(Context, "UPCR_ISNULL_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
       // UPCR_BEGIN_FUNCTION
       {
 	UPCR_BEGIN_FUNCTION = CreateFunction(Context, "UPCR_BEGIN_FUNCTION", Context.VoidTy, NULL, 0);
@@ -244,6 +258,16 @@ namespace {
       {
 	DeclContext *DC = Context.getTranslationUnitDecl();
 	upcr_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern);
+      }
+      // upcr_null_shared
+      {
+	DeclContext *DC = Context.getTranslationUnitDecl();
+	upcr_null_shared = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_null_shared"), upcr_shared_ptr_t, Context.getTrivialTypeSourceInfo(upcr_shared_ptr_t), SC_Extern);
+      }
+      // upcr_null_pshared
+      {
+	DeclContext *DC = Context.getTranslationUnitDecl();
+	upcr_null_pshared = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_null_pshared"), upcr_pshared_ptr_t, Context.getTrivialTypeSourceInfo(upcr_pshared_ptr_t), SC_Extern);
       }
 
     }
@@ -498,6 +522,9 @@ namespace {
 	ExprResult Result = BuildUPCRCall(Accessor, args);
 	TypeSourceInfo *Ty = SemaRef.Context.getTrivialTypeSourceInfo(TransformType(E->getType()));
 	return SemaRef.BuildCStyleCastExpr(SourceLocation(), Ty, SourceLocation(), Result.get());
+      } else if(E->getCastKind() == CK_NullToPointer && isPointerToShared(E->getType())) {
+	bool Phaseless = isPhaseless(E->getType()->getAs<PointerType>()->getPointeeType());
+	return BuildUPCRDeclRef(Phaseless? Decls->upcr_null_pshared : Decls->upcr_null_shared);
       }
       return ExprError();
     }
@@ -805,6 +832,66 @@ namespace {
       }
 
       return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcr_forall_control).get()), NULL, PlainFor.get(), SourceLocation(), UPCForWrapper.get());
+    }
+    ExprResult TransformCondition(Expr *E) {
+      ExprResult Result = TransformExpr(E);
+      if(isPointerToShared(E->getType())) {
+	bool Phaseless = isPhaseless(E->getType()->getAs<PointerType>()->getPointeeType());
+	std::vector<Expr*> args;
+	args.push_back(Result.get());
+	ExprResult Test = BuildUPCRCall(Phaseless?Decls->UPCR_ISNULL_PSHARED:Decls->UPCR_ISNULL_SHARED, args);
+	return SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_LNot, Test.get());
+      } else {
+	return Result;
+      }
+    }
+    StmtResult TransformIfStmt(IfStmt *S) {
+      // Transform the condition
+      ExprResult Cond;
+      VarDecl *ConditionVar = 0;
+      if (S->getConditionVariable()) {
+	ConditionVar
+	  = cast_or_null<VarDecl>(
+                       getDerived().TransformDefinition(
+                                          S->getConditionVariable()->getLocation(),
+                                                        S->getConditionVariable()));
+	if (!ConditionVar)
+	  return StmtError();
+      } else {
+	Cond = TransformCondition(S->getCond());
+	
+	if (Cond.isInvalid())
+	  return StmtError();
+	
+	// Convert the condition to a boolean value.
+	if (S->getCond()) {
+	  ExprResult CondE = getSema().ActOnBooleanCondition(0, S->getIfLoc(),
+							     Cond.get());
+	  if (CondE.isInvalid())
+	    return StmtError();
+	  
+	  Cond = CondE.get();
+	}
+      }
+      
+      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+      if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
+	return StmtError();
+      
+      // Transform the "then" branch.
+      StmtResult Then = getDerived().TransformStmt(S->getThen());
+      if (Then.isInvalid())
+	return StmtError();
+
+      // Transform the "else" branch.
+      StmtResult Else = getDerived().TransformStmt(S->getElse());
+      if (Else.isInvalid())
+	return StmtError();
+
+      return getDerived().RebuildIfStmt(S->getIfLoc(), FullCond, ConditionVar,
+                                        Then.get(),
+                                        S->getElseLoc(), Else.get());
+
     }
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
