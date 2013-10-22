@@ -885,11 +885,11 @@ namespace {
 	  args.push_back(NewBase);
 	  NewBase = BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args).get();
 	}
-	uint64_t Offset = SemaRef.Context.getFieldOffset(FD);
+	CharUnits Offset = SemaRef.Context.toCharUnitsFromBits(SemaRef.Context.getFieldOffset(FD));
 	std::vector<Expr *> args;
 	args.push_back(NewBase);
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), 1));
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset));
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset.getQuantity()));
 	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
       } else {
 	return TreeTransform::TransformMemberExpr(E);
