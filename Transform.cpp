@@ -480,7 +480,8 @@ namespace {
       // Have to handle this separately, as TreeTransform
       // strips off ImplicitCastExprs in TransformInitializer.
       if(ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Init)) {
-	if(ICE->getCastKind() == CK_LValueToRValue && ICE->getSubExpr()->getType().getQualifiers().hasShared()) {
+	if((ICE->getCastKind() == CK_LValueToRValue && ICE->getSubExpr()->getType().getQualifiers().hasShared()) ||
+	   isPointerToShared(ICE->getSubExpr()->getType())) {
 	  return TransformExpr(ICE);
 	} else {
 	  return TransformInitializer(ICE->getSubExpr(), CXXDirectInit);
