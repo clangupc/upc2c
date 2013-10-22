@@ -1097,7 +1097,13 @@ namespace {
 	int i = 0;
 	for(FunctionDecl::param_iterator iter = FD->param_begin(), end = FD->param_end(); iter != end; ++iter) {
 	  ParmVarDecl *OldParam = *iter;
-	  TypeSourceInfo *PTSI = OldParam->getTypeSourceInfo()?TransformType(OldParam->getTypeSourceInfo()):0;
+	  TypeSourceInfo *PTSI = OldParam->getTypeSourceInfo();
+	  if(PTSI && PTSI->getType().getQualifiers().hasShared()) {
+	    // Make sure that shared array parameters are decayed to pointers
+	    PTSI = SemaRef.Context.getTrivialTypeSourceInfo(TransformType(SemaRef.Context.getAdjustedParameterType(PTSI->getType())));
+	  } else {
+	    PTSI = PTSI?TransformType(PTSI):0;
+	  }
 	  ParmVarDecl *Param = ParmVarDecl::Create(SemaRef.Context, result, OldParam->getLocStart(),
 						   OldParam->getLocation(), OldParam->getIdentifier(),
 						   TransformType(OldParam->getType()),
@@ -1179,7 +1185,22 @@ namespace {
 	}
 	return Result;
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
-	return TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), TransformType(TD->getTypeSourceInfo()));
+	TypeSourceInfo *Ty;
+	if(TD->getUnderlyingType().getQualifiers().hasShared()) {
+	  // This shouldn't really be used.  All uses should
+	  // be rewritten anyway.
+	  Qualifiers Quals;
+	  QualType Unqualified = SemaRef.Context.getUnqualifiedArrayType(TD->getUnderlyingType(), Quals);
+	  Quals.removeLayoutQualifier();
+	  Quals.removeStrict();
+	  Quals.removeRelaxed();
+	  Quals.removeLayoutQualifierStar();
+	  Quals.removeShared();
+	  Ty = SemaRef.Context.getTrivialTypeSourceInfo(TransformType(SemaRef.Context.getQualifiedType(Unqualified, Quals)));
+	} else {
+	  Ty = TransformType(TD->getTypeSourceInfo());
+	}
+	return TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), Ty);
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
 	EnumDecl * PrevDecl = 0;
 	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
