@@ -695,7 +695,7 @@ namespace {
 	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	  if(LayoutQualifier == 0) {
 	    Result = BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args);
-	  } else if(LayoutQualifier == 1) {
+	  } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
 	    Result = BuildUPCRCall(Decls->UPCR_SUB_PSHARED1, args);
 	  } else {
 	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
@@ -720,7 +720,7 @@ namespace {
 	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	  if(LayoutQualifier == 0) {
 	    return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
-	  } else if(LayoutQualifier == 1) {
+	  } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
 	    return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
 	  } else {
 	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
@@ -1002,7 +1002,8 @@ namespace {
       return Result;
     }
     bool isPhaseless(QualType Pointee) {
-      return Pointee.getQualifiers().getLayoutQualifier() <= 1;
+      return Pointee.getQualifiers().getLayoutQualifier() <= 1 &&
+	!Pointee->isVoidType();
     }
     QualType TransformPointerType(TypeLocBuilder &TLB, PointerTypeLoc TL) {
       if(isPointerToShared(TL.getType())) {
