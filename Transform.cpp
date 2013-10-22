@@ -64,6 +64,7 @@ namespace {
     FunctionDecl * UPCR_ISNULL_SHARED;
     FunctionDecl * UPCR_SHARED_TO_PSHARED;
     FunctionDecl * UPCR_PSHARED_TO_SHARED;
+    FunctionDecl * UPCR_SHARED_RESETPHASE;
     VarDecl * upcr_forall_control;
     VarDecl * upcr_null_shared;
     VarDecl * upcr_null_pshared;
@@ -259,6 +260,11 @@ namespace {
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
 	UPCR_PSHARED_TO_SHARED = CreateFunction(Context, "UPCR_PSHARED_TO_SHARED", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SHARED_RESETPHASE
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t };
+	UPCR_SHARED_RESETPHASE = CreateFunction(Context, "UPCR_SHARED_RESETPHASE", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -555,6 +561,27 @@ namespace {
       } else if(E->getCastKind() == CK_NullToPointer && isPointerToShared(E->getType())) {
 	bool Phaseless = isPhaseless(E->getType()->getAs<PointerType>()->getPointeeType());
 	return BuildUPCRDeclRef(Phaseless? Decls->upcr_null_pshared : Decls->upcr_null_shared);
+      } else if((E->getCastKind() == CK_BitCast  ||
+		 E->getCastKind() == CK_UPCBitCastZeroPhase) &&
+		isPointerToShared(E->getType())) {
+	QualType DstPointee = E->getType()->getAs<PointerType>()->getPointeeType();
+	QualType SrcPointee = E->getSubExpr()->getType()->getAs<PointerType>()->getPointeeType();
+	FunctionDecl *CastFn = 0;
+	if(isPhaseless(DstPointee) && !isPhaseless(SrcPointee)) {
+	  CastFn = Decls->UPCR_SHARED_TO_PSHARED;
+	} else if(!isPhaseless(DstPointee) && isPhaseless(SrcPointee)) {
+	  CastFn = Decls->UPCR_PSHARED_TO_SHARED;
+	} else if(!isPhaseless(DstPointee) && !isPhaseless(SrcPointee) &&
+		  E->getCastKind() == CK_UPCBitCastZeroPhase) {
+	  CastFn = Decls->UPCR_SHARED_RESETPHASE;
+	}
+	if(CastFn) {
+	  std::vector<Expr *> args;
+	  args.push_back(TransformExpr(E->getSubExpr()).get());
+	  return BuildUPCRCall(CastFn, args);
+	} else {
+	  return TransformExpr(E->getSubExpr());
+	}
       }
       return ExprError();
     }
@@ -594,6 +621,35 @@ namespace {
       }
       return BuildParens(BuildComma(SetTmp, CommaRHS).get());
     }
+    ExprResult CreateUPCPointerArithmetic(Expr *Ptr, Expr *IntVal, QualType PtrTy) {
+      QualType PointeeType = PtrTy->getAs<PointerType>()->getPointeeType();
+      ArrayDimensionT Dims = GetArrayDimension(PointeeType);
+      int ElementSize = Dims.ElementSize;
+      IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
+      args.push_back(IntVal);
+      int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+      if(LayoutQualifier == 0) {
+	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+      } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
+	return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+      } else {
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
+	return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+      }
+    }
+    ExprResult CreateArithmeticExpr(Expr *LHS, Expr *RHS, QualType LHSTy, BinaryOperatorKind Op) {
+      if(isPointerToShared(LHSTy)) {
+	if(Op == BO_Sub) {
+	  RHS = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, RHS).get();
+	}
+	return CreateUPCPointerArithmetic(LHS, RHS, LHSTy);
+      } else {
+	return SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, LHS, RHS);
+      }
+    }
     ExprResult TransformUnaryOperator(UnaryOperator *E) {
       QualType ArgType = E->getSubExpr()->getType();
       if((E->getOpcode() == UO_Deref && isPointerToShared(ArgType)) ||
@@ -610,7 +666,7 @@ namespace {
 	std::pair<Expr *, Expr *> Load = BuildUPCRLoadParts(TmpPtr, ArgType.getUnqualifiedType(), ArgType);
 	Expr * LoadExpr = Load.first;
 	Expr * LoadVar = Load.second;
-	Expr * NewVal = SemaRef.CreateBuiltinBinOp(SourceLocation(), E->isIncrementOp()?BO_Add:BO_Sub, LoadVar, CreateInteger(SemaRef.Context.IntTy, 1)).get();
+	Expr * NewVal = CreateArithmeticExpr(LoadVar, CreateInteger(SemaRef.Context.IntTy, 1), ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
 
 	if(E->isPrefix()) {
 	  Expr * Result = BuildUPCRStore(TmpPtr, NewVal, ArgType).get();
@@ -710,27 +766,11 @@ namespace {
 	} else if((LHSIsShared || RHSIsShared) && (E->getOpcode() == BO_Add || E->getOpcode() == BO_Sub)) {
 	  // Pointer +/- Integer
 	  if(RHSIsShared) { std::swap(LHS, RHS); }
-	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
-	  ArrayDimensionT Dims = GetArrayDimension(PointeeType);
-	  int ElementSize = Dims.ElementSize;
 	  Expr *IntVal = TransformExpr(RHS).get();
-	  IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
 	  if(E->getOpcode() == BO_Sub) {
 	    IntVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, IntVal).get();
 	  }
-	  std::vector<Expr*> args;
-	  args.push_back(TransformExpr(LHS).get());
-	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
-	  args.push_back(IntVal);
-	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
-	  if(LayoutQualifier == 0) {
-	    return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
-	  } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
-	    return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
-	  } else {
-	    args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
-	    return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
-	  }
+	  return CreateUPCPointerArithmetic(TransformExpr(LHS).get(), IntVal, LHS->getType());
 	} else if(LHSIsShared && RHSIsShared && (E->getOpcode() == BO_EQ || E->getOpcode() == BO_NE)) {
 	  // Equality Comparison
 	  std::vector<Expr*> args;
