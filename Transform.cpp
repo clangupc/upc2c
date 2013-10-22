@@ -471,7 +471,7 @@ namespace {
     }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
-	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), TransformType(E->getType()), E->getSubExpr()->getType());
+	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), E->getType(), E->getSubExpr()->getType());
       } else {
 	ExprResult UPCCast = MaybeTransformUPCRCast(E);
 	if(!UPCCast.isInvalid()) {
@@ -519,17 +519,17 @@ namespace {
 	  Accessor = Decls->UPCR_GET_SHARED;
 	}
       }
-      VarDecl *TmpVar = CreateTmpVar(ResultType);
+      VarDecl *TmpVar = CreateTmpVar(TransformType(ResultType));
       // FIXME: Handle other layout qualifiers
       std::vector<Expr*> args;
-      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get()).get());
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
       args.push_back(E);
       // offset
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
-      return std::make_pair(Load, SemaRef.BuildDeclRefExpr(TmpVar, ResultType, VK_LValue, SourceLocation()).get());
+      return std::make_pair(Load, CreateSimpleDeclRef(TmpVar));
     }
     ExprResult MaybeTransformUPCRCast(CastExpr *E) {
       if(E->getCastKind() == CK_UPCSharedToLocal) {
@@ -566,7 +566,7 @@ namespace {
 	  Accessor = Decls->UPCR_PUT_SHARED;
 	}
       }
-      VarDecl *TmpVar = CreateTmpVar(Ty.getUnqualifiedType());
+      VarDecl *TmpVar = CreateTmpVar(TransformType(Ty).getUnqualifiedType());
       Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
       std::vector<Expr*> args;
       args.push_back(LHS);
@@ -595,7 +595,7 @@ namespace {
 	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
 	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
 	Expr * SaveArg = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getSubExpr()).get()).get()).get();
-	std::pair<Expr *, Expr *> Load = BuildUPCRLoadParts(TmpPtr, TransformType(ArgType.getUnqualifiedType()), ArgType);
+	std::pair<Expr *, Expr *> Load = BuildUPCRLoadParts(TmpPtr, ArgType.getUnqualifiedType(), ArgType);
 	Expr * LoadExpr = Load.first;
 	Expr * LoadVar = Load.second;
 	Expr * NewVal = SemaRef.CreateBuiltinBinOp(SourceLocation(), E->isIncrementOp()?BO_Add:BO_Sub, LoadVar, CreateInteger(SemaRef.Context.IntTy, 1)).get();
@@ -769,7 +769,7 @@ namespace {
 	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
 	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
 	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
-	Expr * LHSVal = BuildUPCRLoad(TmpPtr, TransformType(Ty.getUnqualifiedType()), Ty).get();
+	Expr * LHSVal = BuildUPCRLoad(TmpPtr, Ty.getUnqualifiedType(), Ty).get();
 	Expr * OpResult = SemaRef.CreateBuiltinBinOp(SourceLocation(), Opc, LHSVal, RHS).get();
 	Expr * Result = BuildUPCRStore(TmpPtr, OpResult, Ty).get();
 	return BuildParens(BuildComma(SaveLHS, Result).get());
