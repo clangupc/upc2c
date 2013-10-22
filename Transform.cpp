@@ -890,7 +890,7 @@ namespace {
 	BaseType = PT->getPointeeType();
       }
       if(BaseType.getQualifiers().hasShared()) {
-	ValueDecl * FD = cast<ValueDecl>(TransformDecl(E->getMemberLoc(), E->getMemberDecl()));
+	ValueDecl * FD = E->getMemberDecl();
 	Expr *NewBase = TransformExpr(Base).get();
 	if(!isPhaseless(BaseType)) {
 	  std::vector<Expr*> args;
