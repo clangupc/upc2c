@@ -667,6 +667,11 @@ namespace {
 	} else {
 	  return BuildParens(BuildComma(Setup, BuildComma(Saved, BuildComma(Operation, TmpVal).get()).get()).get());
 	}
+      } else if(isPointerToShared(ArgType) && E->getOpcode() == UO_LNot) {
+	bool Phaseless = isPhaseless(ArgType->getAs<PointerType>()->getPointeeType());
+	std::vector<Expr*> args;
+	args.push_back(TransformExpr(E->getSubExpr()).get());
+	return BuildUPCRCall(Phaseless?Decls->UPCR_ISNULL_PSHARED:Decls->UPCR_ISNULL_SHARED, args);
       } else {
 	return TreeTransform::TransformUnaryOperator(E);
       }
