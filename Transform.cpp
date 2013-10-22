@@ -495,7 +495,19 @@ namespace {
       if(!UPCCast.isInvalid()) {
 	return UPCCast;
       } else {
-	return TreeTransform::TransformCStyleCastExpr(E);
+	// The default transform strips off implicit casts
+	TypeSourceInfo *Type = TransformType(E->getTypeInfoAsWritten());
+	if (!Type)
+	  return ExprError();
+
+	ExprResult SubExpr = TransformExpr(E->getSubExpr());
+	if (SubExpr.isInvalid())
+	  return ExprError();
+	
+	return RebuildCStyleCastExpr(E->getLParenLoc(),
+				     Type,
+				     E->getRParenLoc(),
+				     SubExpr.get());
       }
     }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
