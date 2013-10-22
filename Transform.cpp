@@ -1053,12 +1053,29 @@ namespace {
       LocalTemps.push_back(TmpVar);
       return TmpVar;
     }
+    // Allow decls to be skipped
+    StmtResult TransformDeclStmt(DeclStmt *S) {
+      SmallVector<Decl *, 4> Decls;
+      for (DeclStmt::decl_iterator D = S->decl_begin(), DEnd = S->decl_end();
+	   D != DEnd; ++D) {
+	Decl *Transformed = TransformDefinition((*D)->getLocation(), *D);
+	
+	if(Transformed)
+	  Decls.push_back(Transformed);
+      }
+      
+      if(Decls.empty()) {
+	return SemaRef.ActOnNullStmt(S->getEndLoc());
+      } else {
+	return RebuildDeclStmt(Decls.data(), Decls.size(),
+			       S->getStartLoc(), S->getEndLoc());
+      }
+    }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
       if(D == NULL) return NULL;
       Decl *Result = TreeTransform::TransformDecl(Loc, D);
       if(Result == D) {
 	Result = TransformDeclaration(D, SemaRef.CurContext);
-	transformedLocalDecl(D, Result);
       }
       return Result;
     }
@@ -1067,7 +1084,8 @@ namespace {
     //}
     Decl *TransformDeclaration(Decl *D, DeclContext *DC) {
       Decl *Result = TransformDeclarationImpl(D, DC);
-      transformedLocalDecl(D, Result);
+      if(Result)
+	transformedLocalDecl(D, Result);
       return Result;
     }
     bool isPhaseless(QualType Pointee) {
@@ -1152,15 +1170,18 @@ namespace {
 	return result;
       } else if(VarDecl *VD = dyn_cast<VarDecl>(D)) {
 	if(VD->getType().getQualifiers().hasShared()) {
+	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
 	  QualType VarType = (isPhaseless(VD->getType())? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t );
-	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(),
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(),
 					    VD->getLocation(), VD->getIdentifier(),
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
+	  transformedLocalDecl(D, result);
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  if(Expr *Init = VD->getInit()) {
 	    SharedInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
 	  }
-	  return result;
+	  LocalStatics.push_back(result);
+	  return NULL;
 	} else {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
@@ -1283,7 +1304,11 @@ namespace {
 	  // Skip the contents of upc.h, because they're
 	  // declared in upcr_proxy.h
 	  if(!IsUPC_H(Loc)) {
-	    result->addDecl(decl);
+	    for(std::vector<Decl*>::const_iterator locals_iter = LocalStatics.begin(), locals_end = LocalStatics.end(); locals_iter != locals_end; ++locals_iter) {
+	      result->addDecl(*locals_iter);
+	    }
+	    if(decl)
+	      result->addDecl(decl);
 	  }
         } else {
 	  // Record the system headers included by user code
@@ -1299,6 +1324,7 @@ namespace {
 	    CollectedIncludes.insert(Name);
 	  }
 	}
+	LocalStatics.clear();
       }
 
       if(FunctionDecl *Alloc = GetSharedAllocationFunction()) {
@@ -1310,6 +1336,7 @@ namespace {
       SemaRef.setCurScope(0);
       return result;
     }
+    std::vector<Decl*> LocalStatics;
     UPCRDecls *Decls;
     std::vector<VarDecl*> LocalTemps;
     // The shared variables that need to be initialized
