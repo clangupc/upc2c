@@ -500,7 +500,7 @@ namespace {
     }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
-	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), E->getType(), E->getSubExpr()->getType());
+	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), E->getType().getUnqualifiedType(), E->getSubExpr()->getType());
       } else {
 	ExprResult UPCCast = MaybeTransformUPCRCast(E);
 	if(!UPCCast.isInvalid()) {
@@ -617,18 +617,18 @@ namespace {
 	}
       }
       VarDecl *TmpVar = CreateTmpVar(TransformType(Ty).getUnqualifiedType());
-      Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get(), RHS).get();
+      Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
       std::vector<Expr*> args;
       args.push_back(LHS);
       // offset
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
-      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get());
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
       // size
       args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
       Expr *Store = BuildUPCRCall(Accessor, args).get();
       Expr *CommaRHS = Store;
       if(ReturnValue) {
-	CommaRHS = BuildComma(Store, SemaRef.BuildDeclRefExpr(TmpVar, RHS->getType(), VK_LValue, SourceLocation()).get()).get();
+	CommaRHS = BuildComma(Store, CreateSimpleDeclRef(TmpVar)).get();
       }
       return BuildParens(BuildComma(SetTmp, CommaRHS).get());
     }
