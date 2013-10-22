@@ -839,6 +839,20 @@ namespace {
 	return TreeTransform::TransformMemberExpr(E);
       }
     }
+    ExprResult TransformUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *E) {
+      switch(E->getKind()) {
+      case UETT_UPC_LocalSizeOf:
+      case UETT_UPC_BlockSizeOf:
+      case UETT_UPC_ElemSizeOf:
+	{
+	llvm::APSInt Value;
+	SemaRef.VerifyIntegerConstantExpression(E, &Value);
+	return SemaRef.Owned(IntegerLiteral::Create(SemaRef.Context, Value, E->getType(), SourceLocation()));
+	}
+      default:
+	return TreeTransform::TransformUnaryExprOrTypeTraitExpr(E);
+      }
+    }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
       // Transform the initialization statement
       StmtResult Init = getDerived().TransformStmt(S->getInit());
