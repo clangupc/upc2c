@@ -22,6 +22,14 @@ using llvm::APInt;
 
 namespace {
 
+  std::string get_file_id(const std::string& filename) {
+    uint32_t seed = 0;
+    for(std::string::const_iterator iter = filename.begin(), end = filename.end(); iter != end; ++iter) {
+      seed ^= uint32_t(*iter) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+    }
+    return (llvm::sys::path::stem(filename) + "_" + llvm::Twine(seed)).str();
+  }
+
   struct UPCRDecls {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
@@ -338,7 +346,8 @@ namespace {
 
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
   public:
-    RemoveUPCTransform(Sema& S, UPCRDecls* D) : TreeTransform(S), AnonRecordID(0), Decls(D) {
+    RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
+      : TreeTransform(S), AnonRecordID(0), Decls(D), FileString(fileid) {
       UPCSystemHeaders.insert("upc.h");
       UPCSystemHeaders.insert("upc_collective.h");
       UPCSystemHeaders.insert("upc-lib.h");
@@ -1375,6 +1384,7 @@ namespace {
     }
     std::vector<Decl*> LocalStatics;
     UPCRDecls *Decls;
+    std::string FileString;
     std::vector<VarDecl*> LocalTemps;
     // The shared variables that need to be initialized
     // all must have type upcr_shared_ptr_t
@@ -1385,8 +1395,7 @@ namespace {
     typedef std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobalsType;
     std::vector<std::pair<VarDecl*, VarDecl*> > SharedGlobals;
     FunctionDecl* GetSharedAllocationFunction() {
-      // FIXME: randomize (?) the name
-      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_ALLOC_test", SemaRef.Context.VoidTy, 0, 0);
+      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_ALLOC_" + FileString, SemaRef.Context.VoidTy, 0, 0);
       SemaRef.ActOnStartOfFunctionDef(0, Result);
       Sema::SynthesizedFunctionScope Scope(SemaRef, Result);
       StmtResult Body;
@@ -1495,8 +1504,7 @@ namespace {
     typedef std::vector<std::pair<VarDecl *, std::pair<Expr *, QualType> > > SharedInitializersType;
     SharedInitializersType SharedInitializers;
     FunctionDecl * GetSharedInitializationFunction() {
-      // FIXME: randomize (?) the name
-      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_INIT_test", SemaRef.Context.VoidTy, 0, 0);
+      FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_INIT_" + FileString, SemaRef.Context.VoidTy, 0, 0);
       SemaRef.ActOnStartOfFunctionDef(0, Result);
       Sema::SynthesizedFunctionScope Scope(SemaRef, Result);
       StmtResult Body;
@@ -1556,7 +1564,7 @@ namespace {
 
   class RemoveUPCConsumer : public clang::SemaConsumer {
   public:
-    RemoveUPCConsumer(StringRef Output) : filename(Output) {}
+    RemoveUPCConsumer(StringRef Output, StringRef FileString) : filename(Output), fileid(FileString) {}
     virtual void HandleTranslationUnit(clang::ASTContext &Context) {
       TranslationUnitDecl *top = Context.getTranslationUnitDecl();
       // Copy the ASTContext and Sema
@@ -1567,7 +1575,7 @@ namespace {
       ASTConsumer nullConsumer;
       UPCRDecls Decls(newContext);
       Sema newSema(S->getPreprocessor(), newContext, nullConsumer);
-      RemoveUPCTransform Trans(newSema, &Decls);
+      RemoveUPCTransform Trans(newSema, &Decls, fileid);
       Decl *Result = Trans.TransformTranslationUnitDecl(top);
       std::string error;
       llvm::raw_fd_ostream OS(filename.c_str(), error);
@@ -1604,15 +1612,17 @@ namespace {
   private:
     Sema *S;
     std::string filename;
+    std::string fileid;
   };
 
   class RemoveUPCAction : public clang::ASTFrontendAction {
   public:
-    RemoveUPCAction(StringRef OutputFile) : filename(OutputFile) {}
+    RemoveUPCAction(StringRef OutputFile, StringRef FileString) : filename(OutputFile), fileid(FileString) {}
     virtual clang::ASTConsumer *CreateASTConsumer(clang::CompilerInstance &Compiler, llvm::StringRef InFile) {
-      return new RemoveUPCConsumer(filename);
+      return new RemoveUPCConsumer(filename, fileid);
     }
     std::string filename;
+    std::string fileid;
   };
 
 }
@@ -1644,6 +1654,6 @@ int main(int argc, const char ** argv) {
   std::vector<std::string> options(NewOptions.begin(), NewOptions.end());
 
   FileManager Files((FileSystemOptions()));
-  ToolInvocation tool(options, new RemoveUPCAction(OutputFile), &Files);
+  ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile)), &Files);
   tool.run();
 }
