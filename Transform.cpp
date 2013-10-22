@@ -26,6 +26,7 @@ namespace {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
     FunctionDecl * upcr_barrier;
+    FunctionDecl * upcr_poll;
     FunctionDecl * upcr_mythread;
     FunctionDecl * upcr_threads;
     FunctionDecl * upcr_hasMyAffinity_pshared;
@@ -97,6 +98,10 @@ namespace {
       {
 	QualType argTypes[] = { Context.IntTy, Context.IntTy };
 	upcr_barrier = CreateFunction(Context, "upcr_barrier", Context.VoidTy, argTypes, 2);
+      }
+      // upcr_poll
+      {
+	upcr_poll = CreateFunction(Context, "upcr_poll", Context.VoidTy, 0, 0);
       }
       // upcr_mythread
       {
@@ -461,6 +466,11 @@ namespace {
 	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
       }
       Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
+      return SemaRef.Owned(result);
+    }
+    StmtResult TransformUPCFenceStmt(UPCFenceStmt *S) {
+      std::vector<Expr*> args;
+      Stmt *result = BuildUPCRCall(Decls->upcr_poll, args).get();
       return SemaRef.Owned(result);
     }
     ExprResult TransformInitializer(Expr *Init, bool CXXDirectInit) {
