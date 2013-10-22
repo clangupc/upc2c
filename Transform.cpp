@@ -904,6 +904,18 @@ namespace {
 	SemaRef.VerifyIntegerConstantExpression(E, &Value);
 	return SemaRef.Owned(IntegerLiteral::Create(SemaRef.Context, Value, E->getType(), SourceLocation()));
 	}
+      case UETT_SizeOf:
+	{
+	  // shared types can be changed by the transformation
+	  // we need to calculate this up front.
+	  if(E->getTypeOfArgument().getQualifiers().hasShared()) {
+	    ArrayDimensionT Dims = GetArrayDimension(E->getTypeOfArgument());
+	    int ElementSize = Dims.ElementSize;
+	    Expr *IntVal = CreateInteger(SemaRef.Context.getSizeType(), ElementSize);
+	    return MaybeAdjustForArray(Dims, IntVal, BO_Mul);
+	  }
+	  // fallthrough
+	}
       default:
 	return TreeTransform::TransformUnaryExprOrTypeTraitExpr(E);
       }
