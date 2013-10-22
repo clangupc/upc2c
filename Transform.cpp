@@ -42,12 +42,15 @@ namespace {
     FunctionDecl * UPCR_GET_SHARED;
     FunctionDecl * UPCR_PUT_SHARED;
     FunctionDecl * UPCR_ADD_SHARED;
+    FunctionDecl * UPCR_INC_SHARED;
     FunctionDecl * UPCR_GET_PSHARED_STRICT;
     FunctionDecl * UPCR_PUT_PSHARED_STRICT;
     FunctionDecl * UPCR_GET_SHARED_STRICT;
     FunctionDecl * UPCR_PUT_SHARED_STRICT;
     FunctionDecl * UPCR_ADD_PSHAREDI;
     FunctionDecl * UPCR_ADD_PSHARED1;
+    FunctionDecl * UPCR_INC_PSHAREDI;
+    FunctionDecl * UPCR_INC_PSHARED1;
     FunctionDecl * UPCR_SUB_SHARED;
     FunctionDecl * UPCR_SUB_PSHAREDI;
     FunctionDecl * UPCR_SUB_PSHARED1;
@@ -174,6 +177,21 @@ namespace {
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
 	UPCR_ADD_PSHARED1 = CreateFunction(Context, "UPCR_ADD_PSHARED1", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_INC_SHARED
+      {
+	QualType argTypes[] = { Context.getPointerType(upcr_shared_ptr_t), Context.IntTy, Context.IntTy, Context.IntTy };
+	UPCR_INC_SHARED = CreateFunction(Context, "upcr_inc_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_INC_PSHAREDI
+      {
+	QualType argTypes[] = { Context.getPointerType(upcr_pshared_ptr_t), Context.IntTy, Context.IntTy };
+	UPCR_INC_PSHAREDI = CreateFunction(Context, "upcr_inc_psharedI", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_INC_PSHARED1
+      {
+	QualType argTypes[] = { Context.getPointerType(upcr_pshared_ptr_t), Context.IntTy, Context.IntTy };
+	UPCR_INC_PSHARED1 = CreateFunction(Context, "upcr_inc_pshared1", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SUB_SHARED
       {
@@ -588,6 +606,54 @@ namespace {
 	} else {
 	  Expr * Result = BuildUPCRStore(TmpPtr, NewVal, ArgType, false).get();
 	  return BuildParens(BuildComma(SaveArg, BuildComma(LoadExpr, BuildComma(Result, LoadVar).get()).get()).get());
+	}
+      } else if(isPointerToShared(ArgType) && E->isIncrementDecrementOp()) {
+	QualType PointeeType = ArgType->getAs<PointerType>()->getPointeeType();
+	QualType TmpPtrType = SemaRef.Context.getPointerType(TransformType(ArgType));
+	VarDecl * TmpPtrDecl = CreateTmpVar(TmpPtrType);
+	Expr * TmpPtr = CreateSimpleDeclRef(TmpPtrDecl);
+        Expr * Setup = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, TransformExpr(E->getSubExpr()).get()).get()).get();
+	Expr * Access = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, TmpPtr).get();
+
+	Expr * Saved;
+	Expr * TmpVal;
+	if(E->isPostfix()) {
+	  // Save the old value
+	  VarDecl * TmpValDecl = CreateTmpVar(TransformType(ArgType).getUnqualifiedType());
+	  TmpVal = CreateSimpleDeclRef(TmpValDecl);
+	  Saved = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVal, Access).get();
+	}
+
+        ArrayDimensionT Dims = GetArrayDimension(PointeeType);
+	int ElementSize = Dims.ElementSize;
+	Expr *IntVal = CreateInteger(SemaRef.Context.IntTy, 1);
+	IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
+	if(E->isDecrementOp()) {
+	  IntVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, IntVal).get();
+	}
+
+	std::vector<Expr*> args;
+	args.push_back(TmpPtr);
+	args.push_back(CreateInteger(SemaRef.Context.IntTy, ElementSize));
+	args.push_back(IntVal);
+	FunctionDecl * IncFn;
+	int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+        if(isPhaseless(PointeeType)) {
+	  if(LayoutQualifier == 0) {
+	    IncFn = Decls->UPCR_INC_PSHAREDI;
+	  } else {
+	    IncFn = Decls->UPCR_INC_PSHARED1;
+	  }
+	} else {
+	  IncFn = Decls->UPCR_INC_SHARED;
+	  args.push_back(CreateInteger(SemaRef.Context.IntTy, LayoutQualifier));
+	}
+	Expr * Operation = BuildUPCRCall(IncFn, args).get();
+
+	if(E->isPrefix()) {
+	  return BuildParens(BuildComma(Setup, BuildComma(Operation, Access).get()).get());
+	} else {
+	  return BuildParens(BuildComma(Setup, BuildComma(Saved, BuildComma(Operation, TmpVal).get()).get()).get());
 	}
       } else {
 	return TreeTransform::TransformUnaryOperator(E);
