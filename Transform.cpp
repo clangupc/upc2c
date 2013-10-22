@@ -62,6 +62,8 @@ namespace {
     FunctionDecl * UPCR_SHARED_TO_LOCAL;
     FunctionDecl * UPCR_ISNULL_PSHARED;
     FunctionDecl * UPCR_ISNULL_SHARED;
+    FunctionDecl * UPCR_SHARED_TO_PSHARED;
+    FunctionDecl * UPCR_PSHARED_TO_SHARED;
     VarDecl * upcr_forall_control;
     VarDecl * upcr_null_shared;
     VarDecl * upcr_null_pshared;
@@ -247,6 +249,16 @@ namespace {
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
 	UPCR_ISNULL_PSHARED = CreateFunction(Context, "UPCR_ISNULL_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_SHARED_TO_PSHARED
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t };
+	UPCR_SHARED_TO_PSHARED = CreateFunction(Context, "UPCR_SHARED_TO_PSHARED", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_PSHARED_TO_SHARED
+      {
+	QualType argTypes[] = { upcr_pshared_ptr_t };
+	UPCR_PSHARED_TO_SHARED = CreateFunction(Context, "UPCR_PSHARED_TO_SHARED", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -811,9 +823,15 @@ namespace {
       }
       if(BaseType.getQualifiers().hasShared()) {
 	ValueDecl * FD = cast<ValueDecl>(TransformDecl(E->getMemberLoc(), E->getMemberDecl()));
+	Expr *NewBase = TransformExpr(Base).get();
+	if(!isPhaseless(BaseType)) {
+	  std::vector<Expr*> args;
+	  args.push_back(NewBase);
+	  NewBase = BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args).get();
+	}
 	uint64_t Offset = SemaRef.Context.getFieldOffset(FD);
 	std::vector<Expr *> args;
-	args.push_back(TransformExpr(Base).get());
+	args.push_back(NewBase);
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), 1));
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset));
 	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
