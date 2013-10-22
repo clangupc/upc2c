@@ -1182,6 +1182,16 @@ namespace {
 	  }
 	  LocalStatics.push_back(result);
 	  return NULL;
+	} else if(needsDynamicInitializer(VD)) {
+	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
+					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
+					    VD->getStorageClass());
+	  transformedLocalDecl(D, result);
+	  Expr *Init = VD->getInit();
+	  DynamicInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
+	  LocalStatics.push_back(result);
+	  return NULL;
 	} else {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
@@ -1445,6 +1455,16 @@ namespace {
       return SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, Decls, 1)), SourceLocation(), SourceLocation()).get();
     }
 
+    bool needsDynamicInitializer(VarDecl *VD) {
+      if(isPointerToShared(VD->getType()) && VD->hasGlobalStorage() && VD->hasInit()) {
+	return true;
+      } else {
+	return false;
+      }
+    }
+
+    typedef std::vector<std::pair<VarDecl *, Expr *> > DynamicInitializersType;
+    DynamicInitializersType DynamicInitializers;
     typedef std::vector<std::pair<VarDecl *, Expr *> > SharedInitializersType;
     SharedInitializersType SharedInitializers;
     FunctionDecl * GetSharedInitializationFunction() {
@@ -1491,6 +1511,13 @@ namespace {
 	    PutOnce.push_back(BuildUPCRCall(Phaseless?Decls->upcr_put_pshared:Decls->upcr_put_shared, args).get());
 	  }
 	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
+	}
+	{
+	  for(std::size_t i = 0; i < DynamicInitializers.size(); ++i) {
+	    Expr *LHS = CreateSimpleDeclRef(DynamicInitializers[i].first);
+	    Expr *RHS = DynamicInitializers[i].second;
+	    Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LHS, RHS).get());
+	  }
 	}
 
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
