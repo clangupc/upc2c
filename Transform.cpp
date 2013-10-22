@@ -1191,7 +1191,9 @@ namespace {
 	  transformedLocalDecl(D, result);
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  if(Expr *Init = VD->getInit()) {
-	    SharedInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
+	    Qualifiers Quals;
+	    QualType InitTy = TransformType(SemaRef.Context.getUnqualifiedArrayType(VD->getType(), Quals));
+	    SharedInitializers.push_back(std::make_pair(result, std::make_pair(TransformExpr(Init).get(), InitTy)));
 	  }
 	  LocalStatics.push_back(result);
 	  return NULL;
@@ -1478,7 +1480,7 @@ namespace {
 
     typedef std::vector<std::pair<VarDecl *, Expr *> > DynamicInitializersType;
     DynamicInitializersType DynamicInitializers;
-    typedef std::vector<std::pair<VarDecl *, Expr *> > SharedInitializersType;
+    typedef std::vector<std::pair<VarDecl *, std::pair<Expr *, QualType> > > SharedInitializersType;
     SharedInitializersType SharedInitializers;
     FunctionDecl * GetSharedInitializationFunction() {
       // FIXME: randomize (?) the name
@@ -1505,9 +1507,9 @@ namespace {
 	for(SharedInitializersType::iterator iter = SharedInitializers.begin(), end = SharedInitializers.end(); iter != end; ++iter) {
 	  std::string VarName = (Twine("_bupc_") + iter->first->getIdentifier()->getName() + "_val").str();
 	  VarDecl *StoredInit = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(VarName),
-						iter->second->getType(), SemaRef.Context.getTrivialTypeSourceInfo(iter->second->getType()),
+						iter->second.second, SemaRef.Context.getTrivialTypeSourceInfo(iter->second.second),
 						SC_None);
-	  StoredInit->setInit(iter->second);
+	  StoredInit->setInit(iter->second.first);
 	  Initializers.push_back(StoredInit);
 	  Statements.push_back(CreateSimpleDeclStmt(StoredInit));
 	}
