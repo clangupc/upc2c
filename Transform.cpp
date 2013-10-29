@@ -1,6 +1,7 @@
 #include <clang/Tooling/Tooling.h>
 #include <clang/Sema/SemaConsumer.h>
 #include <clang/Sema/Scope.h>
+#include <clang/Lex/HeaderSearch.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -1317,7 +1318,22 @@ namespace {
     std::set<StringRef> CollectedIncludes;
     void PrintIncludes(llvm::raw_ostream& OS) {
       for(std::set<StringRef>::iterator iter = CollectedIncludes.begin(), end = CollectedIncludes.end(); iter != end; ++iter) {
-	OS << "#include <" << *iter << ">\n";
+	StringRef relativeFilePath = *iter;
+	// Test successively larger paths until we
+	// find where the header comes from.
+	for(StringRef Parent = *iter; !Parent.empty(); Parent = llvm::sys::path::parent_path(Parent)) {
+	  const char * start = llvm::sys::path::filename(Parent).begin();
+	  StringRef TestFile = StringRef(start, iter->end() - start);
+	  const DirectoryLookup *CurDir = NULL;
+	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, true, NULL, CurDir, NULL, NULL, NULL, NULL);
+	  if(found) {
+	    if(found == SemaRef.SourceMgr.getFileManager().getFile(*iter)) {
+	      relativeFilePath = TestFile;
+	      break;
+	    }
+	  }
+	}
+	OS << "#include <" << relativeFilePath << ">\n";
       }
     }
     bool TreatAsCHeader(SourceLocation Loc) {
@@ -1330,7 +1346,7 @@ namespace {
     bool IsUPC_H(SourceLocation Loc) {
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
       StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
-      return Name == "upc.h";
+      return Name == "upc.h" || Name == "upc_tick.h";
     }
     std::set<StringRef> UPCSystemHeaders;
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
