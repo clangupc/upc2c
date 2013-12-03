@@ -1674,5 +1674,9 @@ int main(int argc, const char ** argv) {
 
   FileManager Files((FileSystemOptions()));
   ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile)), &Files);
-  tool.run();
+  if(tool.run()) {
+    return EXIT_SUCCESS;
+  } else {
+    return EXIT_FAILURE;
+  }
 }
