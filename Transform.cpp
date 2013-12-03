@@ -1582,6 +1582,9 @@ namespace {
   public:
     RemoveUPCConsumer(StringRef Output, StringRef FileString) : filename(Output), fileid(FileString) {}
     virtual void HandleTranslationUnit(clang::ASTContext &Context) {
+      if(Context.getDiagnostics().hasUncompilableErrorOccurred())
+	return;
+
       TranslationUnitDecl *top = Context.getTranslationUnitDecl();
       // Copy the ASTContext and Sema
       LangOptions LangOpts = Context.getLangOpts();
