@@ -860,9 +860,22 @@ namespace {
 	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
 	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
 	Expr * LHSVal = BuildUPCRLoad(TmpPtr, Ty.getUnqualifiedType(), Ty).get();
-	Expr * OpResult = SemaRef.CreateBuiltinBinOp(SourceLocation(), Opc, LHSVal, RHS).get();
+	Expr * OpResult = CreateArithmeticExpr(LHSVal, RHS, Ty, Opc).get();
 	Expr * Result = BuildUPCRStore(TmpPtr, OpResult, Ty).get();
 	return BuildParens(BuildComma(SaveLHS, Result).get());
+      }	else if(isPointerToShared(E->getLHS()->getType())) {
+	QualType Ty = E->getLHS()->getType();
+	BinaryOperatorKind Opc = BinaryOperator::getOpForCompoundAssignment(E->getOpcode());
+	QualType PtrType = SemaRef.Context.getPointerType(TransformType(Ty));
+	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
+	Expr * TmpPtr = CreateSimpleDeclRef(TmpPtrDecl);
+	Expr * LHSPtr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
+	Expr * SetPtr = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr,
+						   LHSPtr).get();
+	Expr * TmpVar = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, TmpPtr).get();
+	Expr * OpResult = CreateArithmeticExpr(TmpVar, TransformExpr(E->getRHS()).get(), Ty, Opc).get();
+	Expr * Result = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVar, OpResult).get();
+	return BuildParens(BuildComma(SetPtr, Result).get());
       } else {
 	return TreeTransform::TransformCompoundAssignOperator(E);
       }
