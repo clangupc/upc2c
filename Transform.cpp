@@ -494,6 +494,9 @@ namespace {
 	   isPointerToShared(ICE->getSubExpr()->getType())) {
 	  return TransformExpr(ICE);
 	} else {
+	  ExprResult UPCCast = MaybeTransformUPCRCast(ICE);
+	  if(!UPCCast.isInvalid())
+	    return UPCCast;
 	  return TransformInitializer(ICE->getSubExpr(), CXXDirectInit);
 	}
       }
