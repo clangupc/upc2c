@@ -1327,6 +1327,15 @@ namespace {
 
 	SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators, 0, 0);
 	return Result;
+      } else if(LabelDecl *LD = dyn_cast<LabelDecl>(D)) {
+	LabelDecl *Result;
+	if(LD->isGnuLocal()) {
+	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier(), LD->getLocStart());
+	} else {
+	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier());
+	}
+	// FIXME: What to do about the statement?
+        return Result;
       } else {
 	assert(!"Unknown Decl");
       }
