@@ -392,11 +392,13 @@ namespace {
       ArrayDimensionT(ASTContext& Context) :
 	ArrayDimension(Context.getTypeSize(Context.getSizeType()), 1),
 	HasThread(false),
-	ElementSize(0)
+	ElementSize(0),
+	E(NULL)
       {}
       llvm::APInt ArrayDimension;
       bool HasThread;
       int ElementSize;
+      Expr *E;
     };
     ArrayDimensionT GetArrayDimension(QualType Ty) {
       ArrayDimensionT Result(SemaRef.Context);
@@ -409,6 +411,15 @@ namespace {
 	    Result.HasThread = true;
 	  }
 	  Result.ArrayDimension *= TAT->getSize();
+	} else if(const VariableArrayType *VAT = dyn_cast<VariableArrayType>(AT)) {
+	  Expr *Val = BuildParens(VAT->getSizeExpr()).get();
+	  if(Result.E) {
+	    Result.E = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Result.E, Val).get();
+	  } else {
+	    Result.E = Val;
+	  }
+	} else if(isa<IncompleteArrayType>(AT)) {
+	  Result.ArrayDimension = 0;
 	} else {
 	  assert(!"Other array types should not syntax check");
 	}
@@ -418,14 +429,20 @@ namespace {
       return Result;
     }
     ExprResult MaybeAdjustForArray(const ArrayDimensionT & Dims, Expr * E, BinaryOperatorKind Op) {
-      if(Dims.ArrayDimension == 1 && !Dims.HasThread) {
+      if(Dims.ArrayDimension == 1 && !Dims.E && !Dims.HasThread) {
 	return SemaRef.Owned(E);
       } else {
 	Expr *Dimension = IntegerLiteral::Create(SemaRef.Context, Dims.ArrayDimension, SemaRef.Context.getSizeType(), SourceLocation());
 	if(Dims.HasThread) {
 	  std::vector<Expr*> args;
 	  Expr *Threads = BuildUPCRCall(Decls->upcr_threads, args).get();
-	  Dimension = BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Dimension, Threads).get()).get();
+	  Dimension = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Dimension, Threads).get();
+	}
+	if(Dims.E) {
+	  Dimension = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Dimension, Dims.E).get();
+	}
+	if(Dims.HasThread || Dims.E) {
+	  Dimension = BuildParens(Dimension).get();
 	}
 	return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, E, Dimension).get());
       }
