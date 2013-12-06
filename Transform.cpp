@@ -1176,8 +1176,10 @@ namespace {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
 	DeclarationNameInfo FnName = FD->getNameInfo();
+	bool isMain = false;
 	if(FnName.getName() == &SemaRef.Context.Idents.get("main")) {
 	  FnName.setName(&SemaRef.Context.Idents.get("user_main"));
+	  isMain = true;
 	}
 
 	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? TransformType(FD->getTypeSourceInfo()) : 0;
@@ -1231,6 +1233,8 @@ namespace {
 	    LocalTemps.clear();
 	    // Insert the user code
 	    Body.push_back(UserBody);
+	    if(isMain)
+	      Body.push_back(SemaRef.ActOnReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
 	    FnBody = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get();
 	  }
 	  SemaRef.ActOnFinishFunctionBody(result, FnBody);
