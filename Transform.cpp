@@ -1152,8 +1152,11 @@ namespace {
     //}
     Decl *TransformDeclaration(Decl *D, DeclContext *DC) {
       Decl *Result = TransformDeclarationImpl(D, DC);
-      if(Result)
+      if(Result) {
+	if(D->isImplicit())
+	  Result->setImplicit();
 	transformedLocalDecl(D, Result);
+      }
       return Result;
     }
     bool isPhaseless(QualType Pointee) {
@@ -1405,6 +1408,9 @@ namespace {
       for(DeclContext::decl_iterator iter = D->decls_begin(),
           end = D->decls_end(); iter != end; ++iter) {
 	Decl *decl = TransformDeclaration(*iter, result);
+	// Skip implicit Decls
+	if(decl->isImplicit())
+	  continue;
 	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
 	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
 	// Don't output Decls declared in system headers
