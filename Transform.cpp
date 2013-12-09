@@ -1032,7 +1032,8 @@ namespace {
 	ThreadTest = BuildUPCRCall(Phaseless?Decls->upcr_hasMyAffinity_pshared:Decls->upcr_hasMyAffinity_shared, args);
       } else {
 	std::vector<Expr*> args;
-	ThreadTest = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, Afnty.get(), BuildUPCRCall(Decls->upcr_mythread, args).get());
+	Expr * Affinity = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Rem, BuildParens(Afnty.get()).get(), BuildUPCRCall(Decls->upcr_threads, args).get()).get();
+	ThreadTest = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, Affinity, BuildUPCRCall(Decls->upcr_mythread, args).get());
       }
 
       StmtResult UPCBody = SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ThreadTest.get()), NULL, Body.get(), SourceLocation(), NULL);
