@@ -1410,7 +1410,7 @@ namespace {
           end = D->decls_end(); iter != end; ++iter) {
 	Decl *decl = TransformDeclaration(*iter, result);
 	// Skip implicit Decls
-	if(decl->isImplicit())
+	if(!decl || decl->isImplicit())
 	  continue;
 	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
 	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
