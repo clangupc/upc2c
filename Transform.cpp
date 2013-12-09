@@ -355,6 +355,12 @@ namespace {
       UPCSystemHeaders.insert("upc_relaxed.h");
       UPCSystemHeaders.insert("upc_strict.h");
       UPCSystemHeaders.insert("upc_tick.h");
+      UPCSystemHeaders.insert("bupc_extensions.h");
+      UPCSystemHeaders.insert("bupc_atomics.h");
+      UPCSystemHeaders.insert("upc_upc2c.h");
+      //UPCSystemHeaders.insert("upc_types.h");
+
+      UPCHeaderRenames["upc_types.h"] = "upcr_preinclude/upc_types.h";
     }
     bool AlwaysRebuild() { return true; }
     ExprResult BuildParens(Expr * E) {
@@ -1383,6 +1389,10 @@ namespace {
 	    }
 	  }
 	}
+	// Check whether this header has a special name
+	std::map<StringRef, StringRef>::const_iterator pos = UPCHeaderRenames.find(relativeFilePath);
+	if(pos != UPCHeaderRenames.end())
+	  relativeFilePath = pos->second;
 	OS << "#include <" << relativeFilePath << ">\n";
       }
     }
@@ -1396,9 +1406,11 @@ namespace {
     bool IsUPC_H(SourceLocation Loc) {
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
       StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
-      return Name == "upc.h" || Name == "upc_tick.h";
+      return Name == "upc.h" || Name == "upc_tick.h" || Name == "upc_upc2c.h" ||
+	Name == "bupc_extensions.h" || Name == "bupc_atomics.h";
     }
     std::set<StringRef> UPCSystemHeaders;
+    std::map<StringRef, StringRef> UPCHeaderRenames;
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
       TranslationUnitDecl *result = SemaRef.Context.getTranslationUnitDecl();
       Scope CurScope(0, Scope::DeclScope, SemaRef.getDiagnostics());
