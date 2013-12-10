@@ -1514,21 +1514,22 @@ namespace {
 	    }
 	    ElemTy = AT->getElementType();
 	  }
-	  int ElementSize = SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity();
-	  if(LayoutQualifier == 0) {
-	    // FIXME:
+	  llvm::APInt ElementSize(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity());
+	  llvm::APInt ElementsInBlock = LayoutQualifier == 0? ArrayDimension : llvm::APInt(SizeTypeSize, LayoutQualifier);
+	  llvm::APInt BlockSize = ElementsInBlock * ElementSize;
+	  llvm::APInt NumBlocks = LayoutQualifier == 0?
+	    llvm::APInt(SizeTypeSize, 1) :
+	    (ArrayDimension + LayoutQualifier - 1).udiv(ElementsInBlock);
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, BlockSize, SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, NumBlocks, SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, hasThread), SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, ElementSize, SemaRef.Context.getSizeType(), SourceLocation()));
+	  // FIXME: encode the correct mangled type
+	  args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
+	  if(Phaseless) {
+	    PInitializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
 	  } else {
-	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, LayoutQualifier * ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
-	    args.push_back(IntegerLiteral::Create(SemaRef.Context, (ArrayDimension + LayoutQualifier - 1).udiv(llvm::APInt(SizeTypeSize, LayoutQualifier)), SemaRef.Context.getSizeType(), SourceLocation()));
-	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, hasThread), SemaRef.Context.getSizeType(), SourceLocation()));
-	    args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, ElementSize), SemaRef.Context.getSizeType(), SourceLocation()));
-	    // FIXME: encode the correct mangled type
-	    args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
-	    if(Phaseless) {
-	      PInitializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
-	    } else {
-	      Initializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_SHALLOC, args).get());
-	    }
+	    Initializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_SHALLOC, args).get());
 	  }
 	}
 	VarDecl *_bupc_info;
