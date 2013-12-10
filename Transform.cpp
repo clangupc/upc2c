@@ -1121,6 +1121,10 @@ namespace {
                                         S->getElseLoc(), Else.get());
 
     }
+    StmtResult TransformUPCPragmaStmt(UPCPragmaStmt *) {
+      // #pragma upc should be stripped out
+      return SemaRef.ActOnNullStmt(SourceLocation());
+    }
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
       std::string name = (llvm::Twine("_bupc_spilld") + llvm::Twine(ID)).str();
