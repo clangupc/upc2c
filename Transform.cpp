@@ -1132,6 +1132,50 @@ namespace {
                                         S->getElseLoc(), Else.get());
 
     }
+    using TreeTransform::TransformCompoundStmt;
+    StmtResult TransformCompoundStmt(CompoundStmt *S,
+				     bool IsStmtExpr) {
+      Sema::CompoundScopeRAII CompoundScope(getSema());
+
+      bool SubStmtInvalid = false;
+      bool SubStmtChanged = false;
+      SmallVector<Stmt*, 8> Statements;
+      for (CompoundStmt::body_iterator B = S->body_begin(), BEnd = S->body_end();
+	   B != BEnd; ++B) {
+	StmtResult Result = TransformStmt(*B);
+	if (Result.isInvalid()) {
+	  // Immediately fail if this was a DeclStmt, since it's very
+	  // likely that this will cause problems for future statements.
+	  if (isa<DeclStmt>(*B))
+	    return StmtError();
+
+	  // Otherwise, just keep processing substatements and fail later.
+	  SubStmtInvalid = true;
+	  continue;
+	}
+
+	SubStmtChanged = SubStmtChanged || Result.get() != *B;
+
+	// Skip NullStmts.  Several transformations
+	// can generate them, and they aren't needed.
+	if(!Result.isInvalid() && isa<NullStmt>(Result.get()))
+	  continue;
+
+	Statements.push_back(Result.takeAs<Stmt>());
+      }
+
+      if (SubStmtInvalid)
+	return StmtError();
+
+      if (!getDerived().AlwaysRebuild() &&
+	  !SubStmtChanged)
+	return SemaRef.Owned(S);
+
+      return getDerived().RebuildCompoundStmt(S->getLBracLoc(),
+					      Statements,
+					      S->getRBracLoc(),
+					      IsStmtExpr);
+    }
     StmtResult TransformUPCPragmaStmt(UPCPragmaStmt *) {
       // #pragma upc should be stripped out
       return SemaRef.ActOnNullStmt(SourceLocation());
