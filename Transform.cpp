@@ -15,6 +15,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Path.h>
 #include <string>
+#include <cctype>
 #include "../../lib/Sema/TreeTransform.h"
 
 using namespace clang;
@@ -23,12 +24,22 @@ using llvm::APInt;
 
 namespace {
 
+  struct is_ident_char {
+    typedef bool result_type;
+    typedef char argument_type;
+    bool operator()(char arg) const {
+      return std::isalnum(arg) || arg == '_';
+    }
+  };
+
   std::string get_file_id(const std::string& filename) {
     uint32_t seed = 0;
     for(std::string::const_iterator iter = filename.begin(), end = filename.end(); iter != end; ++iter) {
       seed ^= uint32_t(*iter) + 0x9e3779b9 + (seed<<6) + (seed>>2);
     }
-    return (llvm::sys::path::stem(filename) + "_" + llvm::Twine(seed)).str();
+    std::string as_identifier(llvm::sys::path::stem(filename));
+    std::replace_if(as_identifier.begin(), as_identifier.end(), std::not1(is_ident_char()), '_');
+    return (as_identifier + "_" + llvm::Twine(seed)).str();
   }
 
   struct UPCRDecls {
