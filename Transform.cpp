@@ -1426,6 +1426,8 @@ namespace {
 	}
 	// FIXME: What to do about the statement?
         return Result;
+      } else if(isa<EmptyDecl>(D)) {
+	return EmptyDecl::Create(SemaRef.Context, DC, D->getLocation());
       } else {
 	assert(!"Unknown Decl");
       }
