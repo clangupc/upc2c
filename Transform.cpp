@@ -396,14 +396,7 @@ namespace {
     }
     int AnonRecordID;
     IdentifierInfo *getRecordDeclName(IdentifierInfo * OrigName) {
-      // HACK: Anonymous structs aren't passed through correctly in clang <= 3.3
-      //       This may be fixed in the 3.4.
-      if(OrigName) {
-	return OrigName;
-      } else {
-	std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
-	return &SemaRef.Context.Idents.get(Name);
-      }
+      return OrigName;
     }
     struct ArrayDimensionT {
       ArrayDimensionT(ASTContext& Context) :
