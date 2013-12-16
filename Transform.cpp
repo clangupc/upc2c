@@ -1340,7 +1340,7 @@ namespace {
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
 					    VD->getStorageClass());
 	  if(Expr *Init = VD->getInit()) {
-	    result->setInit(TransformExpr(Init).get());
+	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit(), false);
 	  }
 	  return result;
 	}
