@@ -1353,6 +1353,8 @@ namespace {
 	SmallVector<Decl *, 4> Fields;
 	if(RD->isThisDeclarationADefinition()) {
 	  Result->startDefinition();
+          Scope CurScope(SemaRef.getCurScope(), Scope::ClassScope|Scope::DeclScope, SemaRef.getDiagnostics());
+	  SemaRef.ActOnTagStartDefinition(&CurScope, Result);
 	  for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
 	    if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
 	      TypeSourceInfo *DI = FD->getTypeSourceInfo();
@@ -1363,9 +1365,12 @@ namespace {
 	      NewFD->setAccess(FD->getAccess());
 	      Result->addDecl(NewFD);
 	      Fields.push_back(NewFD);
+	    } else {
+	      Result->addDecl(TransformDecl(SourceLocation(), *iter));
 	    }
 	  }
 	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
+	  SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getRBraceLoc());
 	}
 	return Result;
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
