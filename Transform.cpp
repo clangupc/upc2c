@@ -454,6 +454,13 @@ namespace {
       Result.ElementSize = SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity();
       return Result;
     }
+    Expr * MaybeAddParensForMultiply(Expr * E) {
+      if(isa<ParenExpr>(E) || isa<IntegerLiteral>(E) ||
+	 isa<CallExpr>(E))
+	return E;
+      else
+	return BuildParens(E).get();
+    }
     ExprResult MaybeAdjustForArray(const ArrayDimensionT & Dims, Expr * E, BinaryOperatorKind Op) {
       if(Dims.ArrayDimension == 1 && !Dims.E && !Dims.HasThread) {
 	return SemaRef.Owned(E);
@@ -470,7 +477,7 @@ namespace {
 	if(Dims.HasThread || Dims.E) {
 	  Dimension = BuildParens(Dimension).get();
 	}
-	return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, E, Dimension).get());
+	return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, MaybeAddParensForMultiply(E), Dimension).get());
       }
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
