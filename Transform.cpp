@@ -356,6 +356,22 @@ namespace {
     }
   };
 
+  class SubstituteType : public clang::TreeTransform<SubstituteType> {
+  public:
+    SubstituteType(Sema &S, QualType F, QualType T) : TreeTransform(S), From(F), To(T) {}
+    TypeSourceInfo * TransformType(TypeSourceInfo *TI) {
+      if(SemaRef.Context.hasSameType(TI->getType(), From)) {
+	return SemaRef.Context.getTrivialTypeSourceInfo(To);
+      } else {
+	return TreeTransform::TransformType(TI);
+      }
+    }
+    using TreeTransform::TransformType;
+  private:
+    QualType From;
+    QualType To;
+  };
+
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
@@ -1311,10 +1327,33 @@ namespace {
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
 	  transformedLocalDecl(D, result);
 	  SharedGlobals.push_back(std::make_pair(result, VD));
+	  Qualifiers Quals;
+	  QualType RealType = TransformType(SemaRef.Context.getUnqualifiedArrayType(VD->getType(), Quals));
+	  QualType Element = SemaRef.Context.getBaseElementType(RealType);
+	  if(const ElaboratedType * ET = dyn_cast<ElaboratedType>(Element)) {
+	    Element = ET->getNamedType();
+	  }
+	  // If this was declared using an anonymous struct,
+	  // then we need to create a typedef, so that we
+	  // can refer to it later.
+	  if(const TagType *TT = dyn_cast<TagType>(Element.getTypePtr())) {
+	    if(!TT->getDecl()->getIdentifier()) {
+	      std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
+
+	      TypedefDecl * NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
+							     SourceLocation(), SourceLocation(),
+							     &SemaRef.Context.Idents.get(Name),
+							     SemaRef.Context.getTrivialTypeSourceInfo(Element));
+
+	      LocalStatics.push_back(NewTypedef);
+
+	      SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
+	      RealType = Sub.TransformType(RealType);
+	    }
+	  }
 	  if(Expr *Init = VD->getInit()) {
 	    Qualifiers Quals;
-	    QualType InitTy = TransformType(SemaRef.Context.getUnqualifiedArrayType(VD->getType(), Quals));
-	    SharedInitializers.push_back(std::make_pair(result, std::make_pair(TransformExpr(Init).get(), InitTy)));
+	    SharedInitializers.push_back(std::make_pair(result, std::make_pair(TransformExpr(Init).get(), RealType)));
 	  }
 	  LocalStatics.push_back(result);
 	  return NULL;
