@@ -1519,9 +1519,6 @@ namespace {
       for(DeclContext::decl_iterator iter = D->decls_begin(),
           end = D->decls_end(); iter != end; ++iter) {
 	Decl *decl = TransformDeclaration(*iter, result);
-	// Skip implicit Decls
-	if(!decl || decl->isImplicit())
-	  continue;
 	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
 	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
 	// Don't output Decls declared in system headers
@@ -1530,9 +1527,10 @@ namespace {
 	  // declared in upcr_proxy.h
 	  if(!IsUPC_H(Loc)) {
 	    for(std::vector<Decl*>::const_iterator locals_iter = LocalStatics.begin(), locals_end = LocalStatics.end(); locals_iter != locals_end; ++locals_iter) {
+	      if(!(*locals_iter)->isImplicit())
 	      result->addDecl(*locals_iter);
 	    }
-	    if(decl)
+	    if(decl && !decl->isImplicit())
 	      result->addDecl(decl);
 	  }
         } else {
