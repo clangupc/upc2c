@@ -1760,6 +1760,7 @@ namespace {
       ASTContext newContext(LangOpts, Context.getSourceManager(), &Context.getTargetInfo(),
 			    Context.Idents, Context.Selectors, Context.BuiltinInfo,
 			    Context.getTypes().size());
+      newContext.getDiagnostics().setIgnoreAllWarnings(true);
       ASTConsumer nullConsumer;
       UPCRDecls Decls(newContext);
       Sema newSema(S->getPreprocessor(), newContext, nullConsumer);
