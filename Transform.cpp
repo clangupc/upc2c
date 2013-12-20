@@ -1834,6 +1834,11 @@ int main(int argc, const char ** argv) {
   // Write the arguments to a vector
   driver::ArgStringList NewOptions;
   for(ArgList::const_iterator iter = Args->begin(), end = Args->end(); iter != end; ++iter) {
+    // Always parse as UPC
+    if((*iter)->getOption().getID() == options::OPT_INPUT &&
+       iter != Args->begin()) {
+      NewOptions.push_back("-xupc");
+    }
     (*iter)->renderAsInput(*Args, NewOptions);
   }
   // Disable CodeGen
