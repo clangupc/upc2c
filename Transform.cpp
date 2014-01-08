@@ -384,8 +384,6 @@ namespace {
       UPCSystemHeaders.insert("upc_tick.h");
       UPCSystemHeaders.insert("bupc_extensions.h");
       UPCSystemHeaders.insert("bupc_atomics.h");
-      UPCSystemHeaders.insert("upc_upc2c.h");
-      //UPCSystemHeaders.insert("upc_types.h");
 
       UPCHeaderRenames["upc_types.h"] = "upcr_preinclude/upc_types.h";
     }
@@ -1512,7 +1510,9 @@ namespace {
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
       StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
       return Name == "upc.h" || Name == "upc_tick.h" || Name == "upc_upc2c.h" ||
-	Name == "bupc_extensions.h" || Name == "bupc_atomics.h";
+	Name == "bupc_extensions.h" || Name == "bupc_atomics.h" ||
+	Name == "upc_io.h" || Name == "upc_io_bits.h" ||
+	Name == "upc_collective_bits.h";
     }
     std::set<StringRef> UPCSystemHeaders;
     std::map<StringRef, StringRef> UPCHeaderRenames;
@@ -1792,6 +1792,26 @@ namespace {
 	"#endif\n"
 	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
 	"#endif\n";
+      // TODO - BIG hack - it seems that BUPC compiler emits definitions that
+      // end with "_S_trans"
+      OS << "/* Types */\n"
+        "struct bupc_hint_S_trans {\n"
+        "const char * key;\n"
+        "const char * value;\n"
+        "};\n"
+	"struct bupc_local_memvec_S_trans {\n"
+        "void * baseaddr;\n"
+        "unsigned long len;\n"
+        "};\n"
+        "struct bupc_filevec_S_trans {\n"
+        "long offset;\n"
+        "unsigned long len;\n"
+        " };\n"
+        "struct bupc_shared_memvec_S_trans {\n"
+        "bupc_sharedptr_t baseaddr;\n"
+        "size_t blocksize;\n"
+        "size_t len;\n"
+        "};\n";
 
       Result->print(OS);
     }
