@@ -8,9 +8,9 @@
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Tooling/CommonOptionsParser.h>
-#include <clang/Driver/OptTable.h>
-#include <clang/Driver/ArgList.h>
-#include <clang/Driver/Arg.h>
+#include <llvm/Option/OptTable.h>
+#include <llvm/Option/ArgList.h>
+#include <llvm/Option/Arg.h>
 #include <clang/Driver/Options.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Path.h>
@@ -400,7 +400,7 @@ namespace {
     }
     ExprResult BuildUPCRCall(FunctionDecl *FD, std::vector<Expr*>& args) {
       ExprResult Fn = SemaRef.BuildDeclRefExpr(FD, FD->getType(), VK_LValue, SourceLocation());
-      return SemaRef.BuildResolvedCallExpr(Fn.get(), FD, SourceLocation(), args.data(), args.size(), SourceLocation());
+      return SemaRef.BuildResolvedCallExpr(Fn.get(), FD, SourceLocation(), args, SourceLocation());
     }
     ExprResult BuildUPCRDeclRef(VarDecl *VD) {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation());
@@ -1215,8 +1215,7 @@ namespace {
       if(Decls.empty()) {
 	return SemaRef.ActOnNullStmt(S->getEndLoc());
       } else {
-	return RebuildDeclStmt(Decls.data(), Decls.size(),
-			       S->getStartLoc(), S->getEndLoc());
+	return RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc());
       }
     }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
@@ -1837,6 +1836,7 @@ namespace {
 }
 
 int main(int argc, const char ** argv) {
+  using namespace llvm::opt;
   using namespace clang::driver;
 
   // Parse the arguments
@@ -1852,7 +1852,7 @@ int main(int argc, const char ** argv) {
   Args->eraseArg(options::OPT_o);
 
   // Write the arguments to a vector
-  driver::ArgStringList NewOptions;
+  ArgStringList NewOptions;
   for(ArgList::const_iterator iter = Args->begin(), end = Args->end(); iter != end; ++iter) {
     // Always parse as UPC
     if((*iter)->getOption().getID() == options::OPT_INPUT &&
