@@ -1465,27 +1465,32 @@ namespace {
 					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
 					    ED->isScopedUsingClassTag(), ED->isFixed());
 	transformedLocalDecl(D, Result);
-	Result->startDefinition();
 
-	SmallVector<Decl *, 4> Enumerators;
+	if(ED->isThisDeclarationADefinition()) {
 
-	EnumConstantDecl *PrevEnumConstant = 0;
-	for(EnumDecl::enumerator_iterator iter = ED->enumerator_begin(), end = ED->enumerator_end(); iter != end; ++iter) {
-	  Expr *Value = 0;
-	  if(Expr *OrigValue = iter->getInitExpr()) {
-	    Value = TransformExpr(OrigValue).get();
+	  Result->startDefinition();
+
+	  SmallVector<Decl *, 4> Enumerators;
+
+	  EnumConstantDecl *PrevEnumConstant = 0;
+	  for(EnumDecl::enumerator_iterator iter = ED->enumerator_begin(), end = ED->enumerator_end(); iter != end; ++iter) {
+	    Expr *Value = 0;
+	    if(Expr *OrigValue = iter->getInitExpr()) {
+	      Value = TransformExpr(OrigValue).get();
+	    }
+	    EnumConstantDecl *EnumConstant = SemaRef.CheckEnumConstant(Result, PrevEnumConstant, iter->getLocation(), iter->getIdentifier(), Value);
+	    transformedLocalDecl(*iter, EnumConstant);
+
+	    EnumConstant->setAccess(Result->getAccess());
+	    Result->addDecl(EnumConstant);
+	    Enumerators.push_back(EnumConstant);
+	    PrevEnumConstant = EnumConstant;
+
 	  }
-	  EnumConstantDecl *EnumConstant = SemaRef.CheckEnumConstant(Result, PrevEnumConstant, iter->getLocation(), iter->getIdentifier(), Value);
-	  transformedLocalDecl(*iter, EnumConstant);
 
-	  EnumConstant->setAccess(Result->getAccess());
-	  Result->addDecl(EnumConstant);
-	  Enumerators.push_back(EnumConstant);
-	  PrevEnumConstant = EnumConstant;
-
+	  SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators, 0, 0);
 	}
 
-	SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators, 0, 0);
 	return Result;
       } else if(LabelDecl *LD = dyn_cast<LabelDecl>(D)) {
 	LabelDecl *Result;
