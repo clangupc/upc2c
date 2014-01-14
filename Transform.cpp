@@ -1242,6 +1242,34 @@ namespace {
       return Pointee.getQualifiers().getLayoutQualifier() <= 1 &&
 	!Pointee->isVoidType();
     }
+    QualType TransformQualifiedType(TypeLocBuilder &TLB, QualifiedTypeLoc T) {
+      
+      Qualifiers Quals = T.getType().getLocalQualifiers();
+
+      QualType Result = getDerived().TransformType(TLB, T.getUnqualifiedLoc());
+      if (Result.isNull())
+	return QualType();
+
+      // Silently suppress qualifiers if the result type can't be qualified.
+      // FIXME: this is the right thing for template instantiation, but
+      // probably not for other clients.
+      if (Result->isFunctionType() || Result->isReferenceType())
+	return Result;
+
+      // Suppress restrict on pointers-to-shared
+      if (Quals.hasRestrict() && !Result->isPointerType())
+	Quals.removeRestrict();
+
+      if (!Quals.empty()) {
+	Result = SemaRef.BuildQualifiedType(Result, T.getBeginLoc(), Quals);
+	// BuildQualifiedType might not add qualifiers if they are invalid.
+	if (Result.hasLocalQualifiers())
+	  TLB.push<QualifiedTypeLoc>(Result);
+	// No location information to preserve.
+      }
+
+      return Result;
+    }
     QualType TransformPointerType(TypeLocBuilder &TLB, PointerTypeLoc TL) {
       if(isPointerToShared(TL.getType())) {
 	QualType Result = isPhaseless(TL.getType()->getAs<PointerType>()->getPointeeType())?
