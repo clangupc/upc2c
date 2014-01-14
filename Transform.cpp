@@ -99,8 +99,11 @@ namespace {
       FakeLocation = SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
 
       // types
-      upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t");
-      upcr_pshared_ptr_t = CreateTypedefType(Context, "upcr_pshared_ptr_t");
+
+      // Make sure that the size and alignment are correct.
+      QualType SharedPtrTy = Context.getPointerType(Context.getSharedType(Context.VoidTy));
+      upcr_shared_ptr_t = CreateTypedefType(Context, "upcr_shared_ptr_t", SharedPtrTy);
+      upcr_pshared_ptr_t = CreateTypedefType(Context, "upcr_pshared_ptr_t", SharedPtrTy);
       upcr_startup_shalloc_t = CreateTypedefType(Context, "upcr_startup_shalloc_t");
       upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc_t");
 
@@ -345,13 +348,11 @@ namespace {
       return Result;
     }
     QualType CreateTypedefType(ASTContext& Context, StringRef name) {
+      return CreateTypedefType(Context, name, Context.IntTy);
+    }
+    QualType CreateTypedefType(ASTContext& Context, StringRef name, QualType BaseTy) {
       DeclContext *DC = Context.getTranslationUnitDecl();
-      RecordDecl *Result = RecordDecl::Create(Context, TTK_Struct, DC,
-					      SourceLocation(), SourceLocation(),
-					      0);
-      Result->startDefinition();
-      Result->completeDefinition();
-      TypedefDecl *Typedef = TypedefDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get(name), Context.getTrivialTypeSourceInfo(Context.getRecordType(Result)));
+      TypedefDecl *Typedef = TypedefDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get(name), Context.getTrivialTypeSourceInfo(BaseTy));
       return Context.getTypedefType(Typedef);
     }
   };
