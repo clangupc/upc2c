@@ -1895,8 +1895,8 @@ int main(int argc, const char ** argv) {
   // convert to std::string
   std::vector<std::string> options(NewOptions.begin(), NewOptions.end());
 
-  FileManager Files((FileSystemOptions()));
-  ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile)), &Files);
+  FileManager * Files(new FileManager(FileSystemOptions()));
+  ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile)), Files);
   if(tool.run()) {
     return EXIT_SUCCESS;
   } else {
