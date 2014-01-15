@@ -777,31 +777,9 @@ namespace {
 	  Saved = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVal, Access).get();
 	}
 
-        ArrayDimensionT Dims = GetArrayDimension(PointeeType);
-	int ElementSize = Dims.ElementSize;
-	Expr *IntVal = CreateInteger(SemaRef.Context.IntTy, 1);
-	IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
-	if(E->isDecrementOp()) {
-	  IntVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Minus, IntVal).get();
-	}
-
-	std::vector<Expr*> args;
-	args.push_back(TmpPtr);
-	args.push_back(CreateInteger(SemaRef.Context.IntTy, ElementSize));
-	args.push_back(IntVal);
-	FunctionDecl * IncFn;
-	int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
-        if(isPhaseless(PointeeType)) {
-	  if(LayoutQualifier == 0) {
-	    IncFn = Decls->UPCR_INC_PSHAREDI;
-	  } else {
-	    IncFn = Decls->UPCR_INC_PSHARED1;
-	  }
-	} else {
-	  IncFn = Decls->UPCR_INC_SHARED;
-	  args.push_back(CreateInteger(SemaRef.Context.IntTy, LayoutQualifier));
-	}
-	Expr * Operation = BuildUPCRCall(IncFn, args).get();
+	Expr * NewVal = CreateArithmeticExpr(Access, CreateInteger(SemaRef.Context.IntTy, 1),
+					     ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
+	Expr * Operation = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, Access, NewVal).get();
 
 	if(E->isPrefix()) {
 	  return BuildParens(BuildComma(Setup, BuildComma(Operation, Access).get()).get());
