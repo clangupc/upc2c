@@ -1282,6 +1282,19 @@ namespace {
 	return TreeTransform::TransformPointerType(TLB, TL);
       }
     }
+    QualType TransformDecayedType(TypeLocBuilder &TLB, DecayedTypeLoc TL) {
+      // For pointers to shared, we need to ignore the
+      // fact that it was written as an array.
+      if(isPointerToShared(TL.getType())) {
+	QualType Result = isPhaseless(TL.getType()->getAs<PointerType>()->getPointeeType())?
+	  Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
+	TypedefTypeLoc NewT = TLB.push<TypedefTypeLoc>(Result);
+	NewT.setNameLoc(SourceLocation());
+	return Result;
+      } else {
+	return TreeTransform::TransformDecayedType(TLB, TL);
+      }
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
