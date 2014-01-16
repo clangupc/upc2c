@@ -761,7 +761,6 @@ namespace {
 	  return BuildParens(BuildComma(SaveArg, BuildComma(LoadExpr, BuildComma(Result, LoadVar).get()).get()).get());
 	}
       } else if(isPointerToShared(ArgType) && E->isIncrementDecrementOp()) {
-	QualType PointeeType = ArgType->getAs<PointerType>()->getPointeeType();
 	QualType TmpPtrType = SemaRef.Context.getPointerType(TransformType(ArgType));
 	VarDecl * TmpPtrDecl = CreateTmpVar(TmpPtrType);
 	Expr * TmpPtr = CreateSimpleDeclRef(TmpPtrDecl);
@@ -1497,6 +1496,8 @@ namespace {
       } else {
 	assert(!"Unknown Decl");
       }
+      // Should not get here
+      return NULL;
     }
     std::set<StringRef> CollectedIncludes;
     void PrintIncludes(llvm::raw_ostream& OS) {
@@ -1536,6 +1537,7 @@ namespace {
       return Name == "upc.h" || Name == "upc_tick.h" || Name == "upc_upc2c.h" ||
 	Name == "bupc_extensions.h" || Name == "bupc_atomics.h" ||
 	Name == "upc_io.h" || Name == "upc_io_bits.h" ||
+	Name == "upc_castable.h" || Name == "upc_castable_bits.h" ||
 	Name == "upc_collective_bits.h";
     }
     std::set<StringRef> UPCSystemHeaders;
