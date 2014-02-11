@@ -1235,7 +1235,8 @@ namespace {
 	return Result;
 
       // Suppress restrict on pointers-to-shared
-      if (Quals.hasRestrict() && !Result->isPointerType())
+      if (Quals.hasRestrict() && (!Result->isPointerType() ||
+				  Result->hasPointerToSharedRepresentation()))
 	Quals.removeRestrict();
 
       if (!Quals.empty()) {
