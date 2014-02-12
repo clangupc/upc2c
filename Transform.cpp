@@ -42,6 +42,39 @@ namespace {
     return (as_identifier + "_" + llvm::Twine(seed)).str();
   }
 
+  /* Copied from DeclPrinter.cpp */
+  static QualType GetBaseType(QualType T) {
+    // FIXME: This should be on the Type class!
+    QualType BaseType = T;
+    while (!BaseType->isSpecifierType()) {
+      if (isa<TypedefType>(BaseType))
+	break;
+      else if (const PointerType* PTy = BaseType->getAs<PointerType>())
+	BaseType = PTy->getPointeeType();
+      else if (const BlockPointerType *BPy = BaseType->getAs<BlockPointerType>())
+	BaseType = BPy->getPointeeType();
+      else if (const ArrayType* ATy = dyn_cast<ArrayType>(BaseType))
+	BaseType = ATy->getElementType();
+      else if (const FunctionType* FTy = BaseType->getAs<FunctionType>())
+	BaseType = FTy->getResultType();
+      else if (const VectorType *VTy = BaseType->getAs<VectorType>())
+	BaseType = VTy->getElementType();
+      else if (const ReferenceType *RTy = BaseType->getAs<ReferenceType>())
+	BaseType = RTy->getPointeeType();
+      else
+	llvm_unreachable("Unknown declarator!");
+    }
+    return BaseType;
+  }
+
+  static QualType getDeclType(Decl* D) {
+    if (TypedefNameDecl* TDD = dyn_cast<TypedefNameDecl>(D))
+      return TDD->getUnderlyingType();
+    if (ValueDecl* VD = dyn_cast<ValueDecl>(D))
+      return VD->getType();
+    return QualType();
+  }
+
   struct UPCRDecls {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
@@ -1148,6 +1181,10 @@ namespace {
 
 	SubStmtChanged = SubStmtChanged || Result.get() != *B;
 
+	// Insert extra statments first
+	Statements.append(SplitDecls.begin(), SplitDecls.end());
+	SplitDecls.clear();
+
 	// Skip NullStmts.  Several transformations
 	// can generate them, and they aren't needed.
 	if(!Result.isInvalid() && isa<NullStmt>(Result.get()))
@@ -1185,6 +1222,16 @@ namespace {
       for (DeclStmt::decl_iterator D = S->decl_begin(), DEnd = S->decl_end();
 	   D != DEnd; ++D) {
 	Decl *Transformed = TransformDefinition((*D)->getLocation(), *D);
+	
+	// Split shared struct S {} *value;
+	// into shared struct S {}; upcr_pshared_ptr_t value;
+	if (Transformed && Decls.size() == 1 &&
+	    isa<TagDecl>(Decls[0]) &&
+	    isPointerToShared(GetBaseType(getDeclType(Transformed))))
+	{
+	  SplitDecls.push_back(RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc()).get());
+	  Decls.clear();
+	}
 	
 	if(Transformed)
 	  Decls.push_back(Transformed);
@@ -1592,6 +1639,7 @@ namespace {
       SemaRef.setCurScope(0);
       return result;
     }
+    std::vector<Stmt*> SplitDecls;
     std::vector<Decl*> LocalStatics;
     UPCRDecls *Decls;
     std::string FileString;
