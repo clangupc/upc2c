@@ -1288,8 +1288,8 @@ namespace {
 	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
 				    FnName, TransformType(FD->getType()),
 				    FTSI,
-				    FD->getStorageClass(),
-				    FD->isInlineSpecified(), FD->hasWrittenPrototype(),
+				    FD->isInlineSpecified()?SC_Static:FD->getStorageClass(),
+				    false, FD->hasWrittenPrototype(),
 				    FD->isConstexpr());
 	transformedLocalDecl(D, result);
 	// Copy the parameters
