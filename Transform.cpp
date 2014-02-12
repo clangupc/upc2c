@@ -1432,16 +1432,7 @@ namespace {
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
 	TypeSourceInfo *Ty;
 	if(TD->getUnderlyingType().getQualifiers().hasShared()) {
-	  // This shouldn't really be used.  All uses should
-	  // be rewritten anyway.
-	  Qualifiers Quals;
-	  QualType Unqualified = SemaRef.Context.getUnqualifiedArrayType(TD->getUnderlyingType(), Quals);
-	  Quals.removeLayoutQualifier();
-	  Quals.removeStrict();
-	  Quals.removeRelaxed();
-	  Quals.removeLayoutQualifierStar();
-	  Quals.removeShared();
-	  Ty = SemaRef.Context.getTrivialTypeSourceInfo(TransformType(SemaRef.Context.getQualifiedType(Unqualified, Quals)));
+	  return 0;
 	} else {
 	  Ty = TransformType(TD->getTypeSourceInfo());
 	}
