@@ -1422,6 +1422,14 @@ namespace {
 	      Result->addDecl(NewFD);
 	      Fields.push_back(NewFD);
 	    } else {
+	      // Skip tag forward declarations.  
+	      // struct { shared struct A * ptr; }; used to
+	      // be translated into struct { struct A; upc_pshared_ptr_t ptr; };
+	      // These extra declarations are harmless elsewhere, but they
+	      // cause warnings inside structs.
+	      if(TagDecl *TD = dyn_cast<TagDecl>(*iter))
+		if(!TD->isThisDeclarationADefinition())
+		  continue;
 	      Result->addDecl(TransformDecl(SourceLocation(), *iter));
 	    }
 	  }
