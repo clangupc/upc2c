@@ -411,13 +411,19 @@ namespace {
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
       : TreeTransform(S), AnonRecordID(0), Decls(D), FileString(fileid) {
       UPCSystemHeaders.insert("upc.h");
+      UPCSystemHeaders.insert("upc_bits.h");
+      UPCSystemHeaders.insert("upc_castable.h");
+      UPCSystemHeaders.insert("upc_castable_bits.h");
       UPCSystemHeaders.insert("upc_collective.h");
-      UPCSystemHeaders.insert("upc-lib.h");
+      UPCSystemHeaders.insert("upc_collective_bits.h");
+      UPCSystemHeaders.insert("upc_io.h");
+      UPCSystemHeaders.insert("upc_io_bits.h");
       UPCSystemHeaders.insert("upc_relaxed.h");
       UPCSystemHeaders.insert("upc_strict.h");
       UPCSystemHeaders.insert("upc_tick.h");
       UPCSystemHeaders.insert("bupc_extensions.h");
       UPCSystemHeaders.insert("bupc_atomics.h");
+      UPCSystemHeaders.insert("pupc.h");
 
       UPCHeaderRenames["upc_types.h"] = "upcr_preinclude/upc_types.h";
     }
@@ -1578,15 +1584,6 @@ namespace {
       return UPCSystemHeaders.find(Name) == UPCSystemHeaders.end() &&
 	SrcManager.isInSystemHeader(Loc);
     }
-    bool IsUPC_H(SourceLocation Loc) {
-      SourceManager& SrcManager = SemaRef.Context.getSourceManager();
-      StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
-      return Name == "upc.h" || Name == "upc_tick.h" || Name == "upc_upc2c.h" ||
-	Name == "bupc_extensions.h" || Name == "bupc_atomics.h" ||
-	Name == "upc_io.h" || Name == "upc_io_bits.h" ||
-	Name == "upc_castable.h" || Name == "upc_castable_bits.h" ||
-	Name == "upc_collective_bits.h";
-    }
     std::set<StringRef> UPCSystemHeaders;
     std::map<StringRef, StringRef> UPCHeaderRenames;
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
@@ -1602,30 +1599,28 @@ namespace {
 	SourceManager& SrcManager = SemaRef.Context.getSourceManager();
 	SourceLocation Loc = SrcManager.getExpansionLoc((*iter)->getLocation());
 	// Don't output Decls declared in system headers
-	if(!TreatAsCHeader(Loc)) {
-	  // Skip the contents of upc.h, because they're
-	  // declared in upcr_proxy.h
-	  if(!IsUPC_H(Loc)) {
-	    for(std::vector<Decl*>::const_iterator locals_iter = LocalStatics.begin(), locals_end = LocalStatics.end(); locals_iter != locals_end; ++locals_iter) {
-	      if(!(*locals_iter)->isImplicit())
+	if(Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc)) {
+	  for(std::vector<Decl*>::const_iterator locals_iter = LocalStatics.begin(), locals_end = LocalStatics.end(); locals_iter != locals_end; ++locals_iter) {
+	    if(!(*locals_iter)->isImplicit())
 	      result->addDecl(*locals_iter);
-	    }
-	    if(decl && !decl->isImplicit())
-	      result->addDecl(decl);
 	  }
+	  if(decl && !decl->isImplicit())
+	    result->addDecl(decl);
         } else {
-	  // Record the system headers included by user code
-	  SourceLocation HeaderLoc;
-	  SourceLocation IncludeLoc = Loc;
-	  do {
-	    HeaderLoc = IncludeLoc;
-	    IncludeLoc = SrcManager.getIncludeLoc(SrcManager.getFileID(HeaderLoc));
-	  } while(TreatAsCHeader(IncludeLoc));
+	  if(TreatAsCHeader(Loc)) {
+	    // Record the system headers included by user code
+	    SourceLocation HeaderLoc;
+	    SourceLocation IncludeLoc = Loc;
+	    do {
+	      HeaderLoc = IncludeLoc;
+	      IncludeLoc = SrcManager.getIncludeLoc(SrcManager.getFileID(HeaderLoc));
+	    } while(TreatAsCHeader(IncludeLoc));
 
-	  StringRef Name = SrcManager.getFilename(HeaderLoc);
-	  if(!Name.empty()) {
-	    CollectedIncludes.insert(Name);
-	  }
+	    StringRef Name = SrcManager.getFilename(HeaderLoc);
+	    if(!Name.empty()) {
+	      CollectedIncludes.insert(Name);
+	    }
+          }
 	}
 	LocalStatics.clear();
       }
