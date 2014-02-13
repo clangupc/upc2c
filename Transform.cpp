@@ -391,25 +391,27 @@ namespace {
   };
 
   class SubstituteType : public clang::TreeTransform<SubstituteType> {
+    typedef TreeTransform<SubstituteType> TreeTransformS;
   public:
-    SubstituteType(Sema &S, QualType F, QualType T) : TreeTransform(S), From(F), To(T) {}
+    SubstituteType(Sema &S, QualType F, QualType T) : TreeTransformS(S), From(F), To(T) {}
     TypeSourceInfo * TransformType(TypeSourceInfo *TI) {
       if(SemaRef.Context.hasSameType(TI->getType(), From)) {
 	return SemaRef.Context.getTrivialTypeSourceInfo(To);
       } else {
-	return TreeTransform::TransformType(TI);
+	return TreeTransformS::TransformType(TI);
       }
     }
-    using TreeTransform::TransformType;
+    using TreeTransformS::TransformType;
   private:
     QualType From;
     QualType To;
   };
 
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
+    typedef TreeTransform<RemoveUPCTransform> TreeTransformUPC;
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
-      : TreeTransform(S), AnonRecordID(0), Decls(D), FileString(fileid) {
+      : TreeTransformUPC(S), AnonRecordID(0), Decls(D), FileString(fileid) {
       UPCSystemHeaders.insert("upc.h");
       UPCSystemHeaders.insert("upc_bits.h");
       UPCSystemHeaders.insert("upc_castable.h");
@@ -589,7 +591,7 @@ namespace {
 	}
       }
 
-      return TreeTransform::TransformInitializer(Init, CXXDirectInit);
+      return TreeTransformUPC::TransformInitializer(Init, CXXDirectInit);
     }
     ExprResult TransformCStyleCastExpr(CStyleCastExpr *E) {
       ExprResult UPCCast = MaybeTransformUPCRCast(E);
@@ -830,7 +832,7 @@ namespace {
 	args.push_back(TransformExpr(E->getSubExpr()).get());
 	return BuildUPCRCall(Phaseless?Decls->UPCR_ISNULL_PSHARED:Decls->UPCR_ISNULL_SHARED, args);
       } else {
-	return TreeTransform::TransformUnaryOperator(E);
+	return TreeTransformUPC::TransformUnaryOperator(E);
       }
     }
     ExprResult TransformBinaryOperator(BinaryOperator *E) {
@@ -915,7 +917,7 @@ namespace {
 	}
       }
       // Otherwise use the default transform
-      return TreeTransform::TransformBinaryOperator(E);
+      return TreeTransformUPC::TransformBinaryOperator(E);
     }
     ExprResult TransformCompoundAssignOperator(CompoundAssignOperator *E) {
       if(E->getLHS()->getType().getQualifiers().hasShared()) {
@@ -945,7 +947,7 @@ namespace {
 	Expr * Result = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVar, OpResult).get();
 	return BuildParens(BuildComma(SetPtr, Result).get());
       } else {
-	return TreeTransform::TransformCompoundAssignOperator(E);
+	return TreeTransformUPC::TransformCompoundAssignOperator(E);
       }
     }
     ExprResult TransformArraySubscriptExpr(ArraySubscriptExpr *E) {
@@ -971,7 +973,7 @@ namespace {
 	  return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
 	}
       } else {
-	return TreeTransform::TransformArraySubscriptExpr(E);
+	return TreeTransformUPC::TransformArraySubscriptExpr(E);
       }
     }
     ExprResult TransformMemberExpr(MemberExpr *E) {
@@ -995,7 +997,7 @@ namespace {
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset.getQuantity()));
 	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
       } else {
-	return TreeTransform::TransformMemberExpr(E);
+	return TreeTransformUPC::TransformMemberExpr(E);
       }
     }
     ExprResult TransformUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *E) {
@@ -1021,7 +1023,7 @@ namespace {
 	  // fallthrough
 	}
       default:
-	return TreeTransform::TransformUnaryExprOrTypeTraitExpr(E);
+	return TreeTransformUPC::TransformUnaryExprOrTypeTraitExpr(E);
       }
     }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
@@ -1163,7 +1165,7 @@ namespace {
                                         S->getElseLoc(), Else.get());
 
     }
-    using TreeTransform::TransformCompoundStmt;
+    using TreeTransformUPC::TransformCompoundStmt;
     StmtResult TransformCompoundStmt(CompoundStmt *S,
 				     bool IsStmtExpr) {
       Sema::CompoundScopeRAII CompoundScope(getSema());
@@ -1251,7 +1253,7 @@ namespace {
     }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
       if(D == NULL) return NULL;
-      Decl *Result = TreeTransform::TransformDecl(Loc, D);
+      Decl *Result = TreeTransformUPC::TransformDecl(Loc, D);
       if(Result == D) {
 	Result = TransformDeclaration(D, SemaRef.CurContext);
       }
@@ -1310,7 +1312,7 @@ namespace {
 	NewT.setNameLoc(SourceLocation());
 	return Result;
       } else {
-	return TreeTransform::TransformPointerType(TLB, TL);
+	return TreeTransformUPC::TransformPointerType(TLB, TL);
       }
     }
     QualType TransformDecayedType(TypeLocBuilder &TLB, DecayedTypeLoc TL) {
@@ -1323,7 +1325,7 @@ namespace {
 	NewT.setNameLoc(SourceLocation());
 	return Result;
       } else {
-	return TreeTransform::TransformDecayedType(TLB, TL);
+	return TreeTransformUPC::TransformDecayedType(TLB, TL);
       }
     }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
