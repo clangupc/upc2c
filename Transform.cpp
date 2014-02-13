@@ -1415,14 +1415,15 @@ namespace {
 	  // can refer to it later.
 	  if(const TagType *TT = dyn_cast<TagType>(Element.getTypePtr())) {
 	    if(!TT->getDecl()->getIdentifier()) {
-	      std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
-
-	      TypedefDecl * NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
-							     SourceLocation(), SourceLocation(),
-							     &SemaRef.Context.Idents.get(Name),
-							     SemaRef.Context.getTrivialTypeSourceInfo(Element));
-
-	      LocalStatics.push_back(NewTypedef);
+	      TypedefDecl *& NewTypedef = ExtraAnonTagDecls[TT->getDecl()];
+	      if(NewTypedef == NULL) {
+		std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
+		NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
+						 SourceLocation(), SourceLocation(),
+						 &SemaRef.Context.Idents.get(Name),
+						 SemaRef.Context.getTrivialTypeSourceInfo(Element));
+		LocalStatics.push_back(NewTypedef);
+	      }
 
 	      SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
 	      RealType = Sub.TransformType(RealType);
@@ -1634,6 +1635,7 @@ namespace {
       SemaRef.setCurScope(0);
       return result;
     }
+    std::map<Decl*, TypedefDecl*> ExtraAnonTagDecls;
     std::vector<Stmt*> SplitDecls;
     std::vector<Decl*> LocalStatics;
     UPCRDecls *Decls;
