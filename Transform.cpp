@@ -119,7 +119,7 @@ namespace {
     FunctionDecl * UPCR_SHARED_TO_PSHARED;
     FunctionDecl * UPCR_PSHARED_TO_SHARED;
     FunctionDecl * UPCR_SHARED_RESETPHASE;
-    VarDecl * upcr_forall_control;
+    VarDecl * upcrt_forall_control;
     VarDecl * upcr_null_shared;
     VarDecl * upcr_null_pshared;
     QualType upcr_shared_ptr_t;
@@ -351,10 +351,10 @@ namespace {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
 	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
-      // upcr_forall_control
+      // upcrt_forall_control
       {
 	DeclContext *DC = Context.getTranslationUnitDecl();
-	upcr_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcr_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern);
+	upcrt_forall_control = VarDecl::Create(Context, DC, SourceLocation(), SourceLocation(), &Context.Idents.get("upcrt_forall_control"), Context.IntTy, Context.getTrivialTypeSourceInfo(Context.IntTy), SC_Extern);
       }
       // upcr_null_shared
       {
@@ -1096,14 +1096,14 @@ namespace {
       {
 	Sema::CompoundScopeRAII BodyScope(SemaRef);
 	SmallVector<Stmt*, 8> Statements;
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcr_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcrt_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
 	Statements.push_back(UPCFor.get());
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcr_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcrt_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
 
 	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
 
-      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcr_forall_control).get()), NULL, PlainFor.get(), SourceLocation(), UPCForWrapper.get());
+      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcrt_forall_control).get()), NULL, PlainFor.get(), SourceLocation(), UPCForWrapper.get());
     }
     ExprResult TransformCondition(Expr *E) {
       ExprResult Result = TransformExpr(E);
@@ -1848,44 +1848,14 @@ namespace {
 
       OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
 	"#define UPCR_TRANS_EXTRA_INCL\n"
-	"extern int upcrt_gcd (int _a, int _b);\n"
-	"extern int _upcrt_forall_start(int _start_thread, int _step, int _lo, int _scale);\n"
-	"#define upcrt_forall_start(start_thread, step, lo, scale)  \\\n"
-	"       _upcrt_forall_start(start_thread, step, lo, scale)\n"
 	"int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n"
-	"#define upcr_forall_control upcrt_forall_control\n"
 	"#ifndef UPCR_EXIT_FUNCTION\n"
 	"#define UPCR_EXIT_FUNCTION() ((void)0)\n"
 	"#endif\n"
-	"#if UPCR_RUNTIME_SPEC_MAJOR > 3 || (UPCR_RUNTIME_SPEC_MAJOR == 3 && UPCR_RUNTIME_SPEC_MINOR >= 8)\n"
-	"  #define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
+	"#define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
 	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads), (elemsz), #sptr, (typestr) }\n"
-	"#else\n"
-	"  #define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
-	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads) }\n"
-	"#endif\n"
 	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
 	"#endif\n";
-      // TODO - BIG hack - it seems that BUPC compiler emits definitions that
-      // end with "_S_trans"
-      OS << "/* Types */\n"
-        "struct bupc_hint_S_trans {\n"
-        "const char * key;\n"
-        "const char * value;\n"
-        "};\n"
-	"struct bupc_local_memvec_S_trans {\n"
-        "void * baseaddr;\n"
-        "unsigned long len;\n"
-        "};\n"
-        "struct bupc_filevec_S_trans {\n"
-        "long offset;\n"
-        "unsigned long len;\n"
-        " };\n"
-        "struct bupc_shared_memvec_S_trans {\n"
-        "bupc_sharedptr_t baseaddr;\n"
-        "size_t blocksize;\n"
-        "size_t len;\n"
-        "};\n";
 
       Result->print(OS);
     }
