@@ -1583,6 +1583,7 @@ namespace {
     bool TreatAsCHeader(SourceLocation Loc) {
       if(Loc.isInvalid()) return false;
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
+      if(SrcManager.getFileID(Loc) == SrcManager.getMainFileID()) return false;
       StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
       return UPCSystemHeaders.find(Name) == UPCSystemHeaders.end() &&
 	SrcManager.isInSystemHeader(Loc);
