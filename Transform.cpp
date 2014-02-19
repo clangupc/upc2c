@@ -708,6 +708,33 @@ namespace {
 	} else {
 	  return TransformExpr(E->getSubExpr());
 	}
+      } else if(E->getCastKind() == CK_PointerToIntegral &&
+		isPointerToShared(E->getSubExpr()->getType())) {
+	// create temporary
+	// memcpy
+	// load
+	QualType SrcType = TransformType(E->getSubExpr()->getType());
+	QualType DstType = TransformType(E->getType());
+	CharUnits SrcSize = SemaRef.Context.getTypeSizeInChars(E->getSubExpr()->getType());
+	CharUnits DstSize = SemaRef.Context.getTypeSizeInChars(E->getType());
+	if(SrcSize < DstSize) {
+	  VarDecl *Dst = CreateTmpVar(DstType);
+	  Expr * DstVal = CreateSimpleDeclRef(Dst);
+	  Expr * DstAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, DstVal).get();
+	  SemaRef.AddInitializerToDecl(Dst, CreateInteger(SemaRef.Context.IntTy, 0), false, false);
+	  Expr * Target = SemaRef.BuildCStyleCastExpr(SourceLocation(), SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getPointerType(SrcType)), SourceLocation(), DstAddr).get();
+	  Expr * Deref = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, Target).get();
+	  Expr * Assign = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, Deref, TransformExpr(E->getSubExpr()).get()).get();
+	  return BuildParens(BuildComma(Assign, DstVal).get()).get();
+	} else {
+	  VarDecl *Src = CreateTmpVar(TransformType(E->getSubExpr()->getType()));
+	  Expr * SrcVal = CreateSimpleDeclRef(Src);
+	  Expr * SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, SrcVal).get();
+	  Expr * SetVal = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, SrcVal, TransformExpr(E->getSubExpr()).get()).get();
+	  Expr * Result = SemaRef.BuildCStyleCastExpr(SourceLocation(), SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getPointerType(DstType)), SourceLocation(), SrcAddr).get();
+	  Expr * Deref = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, Result).get();
+	  return BuildParens(BuildComma(SetVal, Deref).get()).get();
+	}
       }
       return ExprError();
     }
