@@ -1356,7 +1356,9 @@ namespace {
       }
     }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
-      if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
+      if(isa<NamedDecl>(D) && cast<NamedDecl>(D)->getIdentifier() == &SemaRef.Context.Idents.get("__builtin_va_list")) {
+	return SemaRef.Context.getBuiltinVaListDecl();
+      } else if(TranslationUnitDecl *TUD = dyn_cast<TranslationUnitDecl>(D)) {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
 	DeclarationNameInfo FnName = FD->getNameInfo();
