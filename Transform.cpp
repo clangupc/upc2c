@@ -89,8 +89,6 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * upcr_startup_shalloc;
-    FunctionDecl * upcr_put_pshared;
-    FunctionDecl * upcr_put_shared;
     FunctionDecl * UPCR_GET_PSHARED;
     FunctionDecl * UPCR_PUT_PSHARED;
     FunctionDecl * UPCR_GET_SHARED;
@@ -177,70 +175,60 @@ namespace {
 	QualType argTypes[] = { upcr_shared_ptr_t };
 	upcr_hasMyAffinity_shared = CreateFunction(Context, "upcr_hasMyAffinity_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
-      // upcr_put_pshared
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	upcr_put_pshared = CreateFunction(Context, "upcr_put_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // upcr_put_shared
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	upcr_put_shared = CreateFunction(Context, "upcr_put_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
       // UPCR_GET_PSHARED
       {
 	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_PSHARED = CreateFunction(Context, "UPCR_GET_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_GET_PSHARED = CreateFunction(Context, "upcr_get_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PUT_PSHARED
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_PSHARED = CreateFunction(Context, "UPCR_PUT_PSHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PUT_PSHARED = CreateFunction(Context, "upcr_put_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_SHARED
       {
 	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_SHARED = CreateFunction(Context, "UPCR_GET_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_GET_SHARED = CreateFunction(Context, "upcr_get_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PUT_SHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_SHARED = CreateFunction(Context, "UPCR_PUT_SHARED", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PUT_SHARED = CreateFunction(Context, "upcr_put_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_PSHARED_STRICT
       {
 	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_PSHARED_STRICT = CreateFunction(Context, "UPCR_GET_PSHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_GET_PSHARED_STRICT = CreateFunction(Context, "upcr_get_pshared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PUT_PSHARED_STRICT
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_PSHARED_STRICT = CreateFunction(Context, "UPCR_PUT_PSHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PUT_PSHARED_STRICT = CreateFunction(Context, "upcr_put_pshared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_SHARED_STRICT
       {
 	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_SHARED_STRICT = CreateFunction(Context, "UPCR_GET_SHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_GET_SHARED_STRICT = CreateFunction(Context, "upcr_get_shared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PUT_SHARED_STRICT
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_SHARED_STRICT = CreateFunction(Context, "UPCR_PUT_SHARED_STRICT", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PUT_SHARED_STRICT = CreateFunction(Context, "upcr_put_shared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_SHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.IntTy, Context.IntTy };
-	UPCR_ADD_SHARED = CreateFunction(Context, "UPCR_ADD_SHARED", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ADD_SHARED = CreateFunction(Context, "upcr_add_shared", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_PSHAREDI
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_ADD_PSHAREDI = CreateFunction(Context, "UPCR_ADD_PSHAREDI", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ADD_PSHAREDI = CreateFunction(Context, "upcr_add_psharedI", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_PSHARED1
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_ADD_PSHARED1 = CreateFunction(Context, "UPCR_ADD_PSHARED1", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ADD_PSHARED1 = CreateFunction(Context, "upcr_add_pshared1", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_INC_SHARED
       {
@@ -260,72 +248,72 @@ namespace {
       // UPCR_SUB_SHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_SUB_SHARED = CreateFunction(Context, "UPCR_SUB_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SUB_SHARED = CreateFunction(Context, "upcr_sub_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SUB_PSHAREDI
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t, Context.IntTy };
-	UPCR_SUB_PSHAREDI = CreateFunction(Context, "UPCR_SUB_PSHAREDI", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SUB_PSHAREDI = CreateFunction(Context, "upcr_sub_psharedI", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SUB_PSHARED1
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t, Context.IntTy };
-	UPCR_SUB_PSHARED1 = CreateFunction(Context, "UPCR_SUB_PSHARED1", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SUB_PSHARED1 = CreateFunction(Context, "upcr_sub_pshared1", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISEQUAL_SHARED_SHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, upcr_shared_ptr_t };
-	UPCR_ISEQUAL_SHARED_SHARED = CreateFunction(Context, "UPCR_ISEQUAL_SHARED_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISEQUAL_SHARED_SHARED = CreateFunction(Context, "upcr_isequal_shared_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISEQUAL_SHARED_PSHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t, upcr_pshared_ptr_t };
-	UPCR_ISEQUAL_SHARED_PSHARED = CreateFunction(Context, "UPCR_ISEQUAL_SHARED_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISEQUAL_SHARED_PSHARED = CreateFunction(Context, "upcr_isequal_shared_pshared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISEQUAL_PSHARED_SHARED
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_shared_ptr_t };
-	UPCR_ISEQUAL_PSHARED_SHARED = CreateFunction(Context, "UPCR_ISEQUAL_PSHARED_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISEQUAL_PSHARED_SHARED = CreateFunction(Context, "upcr_isequal_pshared_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISEQUAL_PSHARED_PSHARED
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t, upcr_pshared_ptr_t };
-	UPCR_ISEQUAL_PSHARED_PSHARED = CreateFunction(Context, "UPCR_ISEQUAL_PSHARED_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISEQUAL_PSHARED_PSHARED = CreateFunction(Context, "upcr_isequal_pshared_pshared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SHARED_TO_LOCAL
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
-	UPCR_SHARED_TO_LOCAL = CreateFunction(Context, "UPCR_SHARED_TO_LOCAL", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SHARED_TO_LOCAL = CreateFunction(Context, "upcr_shared_to_local", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PSHARED_TO_LOCAL
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
-	UPCR_PSHARED_TO_LOCAL = CreateFunction(Context, "UPCR_PSHARED_TO_LOCAL", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PSHARED_TO_LOCAL = CreateFunction(Context, "upcr_pshared_to_local", Context.VoidPtrTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISNULL_SHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
-	UPCR_ISNULL_SHARED = CreateFunction(Context, "UPCR_ISNULL_SHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISNULL_SHARED = CreateFunction(Context, "upcr_isnull_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ISNULL_PSHARED
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
-	UPCR_ISNULL_PSHARED = CreateFunction(Context, "UPCR_ISNULL_PSHARED", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_ISNULL_PSHARED = CreateFunction(Context, "upcr_isnull_pshared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SHARED_TO_PSHARED
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
-	UPCR_SHARED_TO_PSHARED = CreateFunction(Context, "UPCR_SHARED_TO_PSHARED", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SHARED_TO_PSHARED = CreateFunction(Context, "upcr_shared_to_pshared", upcr_pshared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_PSHARED_TO_SHARED
       {
 	QualType argTypes[] = { upcr_pshared_ptr_t };
-	UPCR_PSHARED_TO_SHARED = CreateFunction(Context, "UPCR_PSHARED_TO_SHARED", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_PSHARED_TO_SHARED = CreateFunction(Context, "upcr_pshared_to_shared", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_SHARED_RESETPHASE
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
-	UPCR_SHARED_RESETPHASE = CreateFunction(Context, "UPCR_SHARED_RESETPHASE", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+	UPCR_SHARED_RESETPHASE = CreateFunction(Context, "upcr_shared_resetphase", upcr_shared_ptr_t, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_BEGIN_FUNCTION
       {
@@ -1609,6 +1597,19 @@ namespace {
 	OS << "#include <" << relativeFilePath << ">\n";
       }
     }
+    void PrintDefines(llvm::raw_ostream& OS) {
+      OS << "#define MYTHREAD (int)upcr_mythread()\n";
+      OS << "#ifndef __UPC_STATIC_THREADS__\n";
+      OS << "# define THREADS (int)upcr_threads()\n";
+      OS << "#endif\n";
+      OS << "#define upcr_barrier(x,y) do {  \\\n";
+      OS << "        int _x = (x), _y = (y); \\\n";
+      OS << "        upcr_notify(_x,_y);     \\\n";
+      OS << "        upcr_wait(_x,_y);       \\\n";
+      OS << "        } while (0)\n";
+      OS << "#define bupc_poll()  upcr_poll_nofence()\n";
+      OS << "#define upc_poll()  upcr_poll_nofence()\n";
+    }
     bool TreatAsCHeader(SourceLocation Loc) {
       if(Loc.isInvalid()) return false;
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
@@ -1831,7 +1832,7 @@ namespace {
 	    args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
 	    args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
 	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
-	    PutOnce.push_back(BuildUPCRCall(Phaseless?Decls->upcr_put_pshared:Decls->upcr_put_shared, args).get());
+	    PutOnce.push_back(BuildUPCRCall(Phaseless?Decls->UPCR_PUT_PSHARED:Decls->UPCR_PUT_SHARED, args).get());
 	  }
 	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
 	}
@@ -1872,8 +1873,8 @@ namespace {
       std::string error;
       llvm::raw_fd_ostream OS(filename.c_str(), error);
       OS << "#include <upcr.h>\n";
-      OS << "#include <upcr_proxy.h>\n";
 
+      Trans.PrintDefines(OS);
       Trans.PrintIncludes(OS);
 
       OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
