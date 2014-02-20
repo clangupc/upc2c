@@ -533,11 +533,8 @@ namespace {
 	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
 	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
 	}
-	if(1) {
-	  // FIXME: could exclude this cast if ID already has a "suitable" type,
-	  // where suitable means no reasonable backend compiler would warn.
-	  // Can't use isIntegerType() because it includes types that could
-	  // yield warnings about signedness or narrowing/truncation.
+	if(! Ty->isSpecificBuiltinType(BuiltinType::Int)) {
+	  // FIXME: could omit this cast for more expression types than int
 	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
 	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
 	}
