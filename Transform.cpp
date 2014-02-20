@@ -521,17 +521,30 @@ namespace {
       }
     }
     std::vector<Expr*> BuildUPCBarrierArgs(Expr *ID) {
+      ASTContext& Context = SemaRef.Context;
       bool isAnon = !ID;
       if(isAnon) {
-        ID = IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation());
+	ID = IntegerLiteral::Create(Context, APInt(32, 0), Context.IntTy, SourceLocation());
       } else {
-        ID = TransformExpr(ID).get();
+	ID = TransformExpr(ID).get();
+	QualType Ty = ID->getType();
+	if(Ty->isPointerType()) {
+	  // Pointer types get 2 casts; this one silences "narrowing" warnings
+	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
+	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
+	}
+	if(1) {
+	  // FIXME: could exclude this cast if ID already has a "suitable" type,
+	  // where suitable means no reasonable backend compiler would warn.
+	  // Can't use isIntegerType() because it includes types that could
+	  // yield warnings about signedness or narrowing/truncation.
+	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
+	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
+	}
       }
       std::vector<Expr*> args;
       args.push_back(ID);
-      args.push_back(IntegerLiteral::Create(
-	SemaRef.Context, APInt(32, isAnon), SemaRef.Context.IntTy, SourceLocation()));
+      args.push_back(IntegerLiteral::Create(Context, APInt(32, isAnon), Context.IntTy, SourceLocation()));
       return args;
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
