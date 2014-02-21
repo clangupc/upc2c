@@ -525,19 +525,18 @@ namespace {
       bool isAnon = !ID;
       if(isAnon) {
 	ID = IntegerLiteral::Create(Context, APInt(32, 0), Context.IntTy, SourceLocation());
+      } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(ID)) {
+	ID = TransformExpr(ICE->getSubExpr()).get();
+	TypeSourceInfo *Type;
+	if(ICE->getCastKind() == CK_PointerToIntegral) {
+	  // Pointer types get 2 casts; this one silences "narrowing" warnings
+	  Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
+	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
+	}
+	Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
+	ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
       } else {
 	ID = TransformExpr(ID).get();
-	QualType Ty = ID->getType();
-	if(Ty->isPointerType()) {
-	  // Pointer types get 2 casts; this one silences "narrowing" warnings
-	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
-	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
-	}
-	if(! Ty->isSpecificBuiltinType(BuiltinType::Int)) {
-	  // FIXME: could omit this cast for more expression types than int
-	  TypeSourceInfo *Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
-	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
-	}
       }
       std::vector<Expr*> args;
       args.push_back(ID);
