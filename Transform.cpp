@@ -412,22 +412,6 @@ namespace {
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
       : TreeTransformUPC(S), AnonRecordID(0), Decls(D), FileString(fileid) {
-      UPCSystemHeaders.insert("upc.h");
-      UPCSystemHeaders.insert("upc_bits.h");
-      UPCSystemHeaders.insert("upc_castable.h");
-      UPCSystemHeaders.insert("upc_castable_bits.h");
-      UPCSystemHeaders.insert("upc_collective.h");
-      UPCSystemHeaders.insert("upc_collective_bits.h");
-      UPCSystemHeaders.insert("upc_io.h");
-      UPCSystemHeaders.insert("upc_io_bits.h");
-      UPCSystemHeaders.insert("upc_relaxed.h");
-      UPCSystemHeaders.insert("upc_strict.h");
-      UPCSystemHeaders.insert("upc_tick.h");
-      UPCSystemHeaders.insert("bupc_extensions.h");
-      UPCSystemHeaders.insert("bupc_atomics.h");
-      UPCSystemHeaders.insert("pupc.h");
-
-      UPCHeaderRenames["upc_types.h"] = "upcr_preinclude/upc_types.h";
     }
     bool AlwaysRebuild() { return true; }
     ExprResult BuildParens(Expr * E) {
@@ -1613,8 +1597,9 @@ namespace {
       if(Loc.isInvalid()) return false;
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
       if(SrcManager.getFileID(Loc) == SrcManager.getMainFileID()) return false;
-      StringRef Name = llvm::sys::path::filename(SrcManager.getFilename(Loc));
-      return UPCSystemHeaders.find(Name) == UPCSystemHeaders.end() &&
+      // Make sure we don't output any UPC system includes
+      std::string FilePath = SrcManager.getFilename(Loc).str();
+      return FilePath.find("/upcr_preinclude/") == std::string::npos &&
 	SrcManager.isInSystemHeader(Loc);
     }
     std::set<StringRef> UPCSystemHeaders;
