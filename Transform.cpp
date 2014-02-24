@@ -1506,6 +1506,15 @@ namespace {
 	      NewFD->setAccess(FD->getAccess());
 	      Result->addDecl(NewFD);
 	      Fields.push_back(NewFD);
+	    } else if(IndirectFieldDecl *IFD = dyn_cast_or_null<IndirectFieldDecl>(*iter)) {
+	      NamedDecl **Chaining = new(SemaRef.Context) NamedDecl*[IFD->getChainingSize()];
+	      NamedDecl **OutIt = Chaining;
+	      for(IndirectFieldDecl::chain_iterator chain_iter = IFD->chain_begin(), chain_end = IFD->chain_end(); chain_iter != chain_end; ++chain_iter, ++OutIt) {
+		*OutIt = cast<NamedDecl>(TransformDecl(SourceLocation(), *chain_iter));
+	      }
+	      IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), TransformType(IFD->getType()), Chaining, IFD->getChainingSize());
+	      transformedLocalDecl(IFD, NewIFD);
+	      Result->addDecl(NewIFD);
 	    } else {
 	      // Skip tag forward declarations.  
 	      // struct { shared struct A * ptr; }; used to
