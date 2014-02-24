@@ -573,6 +573,16 @@ namespace {
       Stmt *result = BuildUPCRCall(Decls->upcr_poll, args).get();
       return SemaRef.Owned(result);
     }
+    ExprResult TransformUPCThreadExpr(UPCThreadExpr *E) {
+      std::vector<Expr*> args;
+      Expr *Call = BuildUPCRCall(Decls->upcr_threads, args).get();
+      return SemaRef.BuildCStyleCastExpr(SourceLocation(), SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.IntTy), SourceLocation(), Call);
+    }
+    ExprResult TransformUPCMyThreadExpr(UPCMyThreadExpr *E) {
+      std::vector<Expr*> args;
+      Expr *Call = BuildUPCRCall(Decls->upcr_mythread, args).get();
+      return SemaRef.BuildCStyleCastExpr(SourceLocation(), SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.IntTy), SourceLocation(), Call);
+    }
     ExprResult TransformInitializer(Expr *Init, bool CXXDirectInit) {
       if(!Init)
 	return SemaRef.Owned(Init);
