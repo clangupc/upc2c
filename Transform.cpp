@@ -492,51 +492,41 @@ namespace {
 	return BuildParens(SemaRef.CreateBuiltinBinOp(SourceLocation(), Op, MaybeAddParensForMultiply(E), Dimension).get());
       }
     }
-    StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
-      Expr *ID = S->getIdValue();
-      std::vector<Expr*> args;
-      if(ID) {
-	args.push_back(TransformExpr(ID).get());
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
+    std::vector<Expr*> BuildUPCBarrierArgs(Expr *ID) {
+      ASTContext& Context = SemaRef.Context;
+      bool isAnon = !ID;
+      if(isAnon) {
+	ID = IntegerLiteral::Create(Context, APInt(32, 0), Context.IntTy, SourceLocation());
+      } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(ID)) {
+	ID = TransformExpr(ICE->getSubExpr()).get();
+	TypeSourceInfo *Type;
+	if(ICE->getCastKind() == CK_PointerToIntegral) {
+	  // Pointer types get 2 casts; this one silences "narrowing" warnings
+	  Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
+	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
+	}
+	Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
+	ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
       } else {
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
+	ID = TransformExpr(ID).get();
       }
+      std::vector<Expr*> args;
+      args.push_back(ID);
+      args.push_back(IntegerLiteral::Create(Context, APInt(32, isAnon), Context.IntTy, SourceLocation()));
+      return args;
+    }
+    StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
+      std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_notify, args).get();
       return SemaRef.Owned(result);
     }
     StmtResult TransformUPCWaitStmt(UPCWaitStmt *S) {
-      Expr *ID = S->getIdValue();
-      std::vector<Expr*> args;
-      if(ID) {
-	args.push_back(TransformExpr(ID).get());
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
-      } else {
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
-      }
+      std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_wait, args).get();
       return SemaRef.Owned(result);
     }
     StmtResult TransformUPCBarrierStmt(UPCBarrierStmt *S) {
-      Expr *ID = S->getIdValue();
-      std::vector<Expr*> args;
-      if(ID) {
-	args.push_back(TransformExpr(ID).get());
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
-      } else {
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 0), SemaRef.Context.IntTy, SourceLocation()));
-	args.push_back(IntegerLiteral::Create(
-	  SemaRef.Context, APInt(32, 1), SemaRef.Context.IntTy, SourceLocation()));
-      }
+      std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
       return SemaRef.Owned(result);
     }
