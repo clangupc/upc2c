@@ -1600,19 +1600,6 @@ namespace {
 	OS << "#include <" << relativeFilePath << ">\n";
       }
     }
-    void PrintDefines(llvm::raw_ostream& OS) {
-      OS << "#define MYTHREAD (int)upcr_mythread()\n";
-      OS << "#ifndef __UPC_STATIC_THREADS__\n";
-      OS << "# define THREADS (int)upcr_threads()\n";
-      OS << "#endif\n";
-      OS << "#define upcr_barrier(x,y) do {  \\\n";
-      OS << "        int _x = (x), _y = (y); \\\n";
-      OS << "        upcr_notify(_x,_y);     \\\n";
-      OS << "        upcr_wait(_x,_y);       \\\n";
-      OS << "        } while (0)\n";
-      OS << "#define bupc_poll()  upcr_poll_nofence()\n";
-      OS << "#define upc_poll()  upcr_poll_nofence()\n";
-    }
     bool TreatAsCHeader(SourceLocation Loc) {
       if(Loc.isInvalid()) return false;
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
@@ -1878,7 +1865,6 @@ namespace {
       llvm::raw_fd_ostream OS(filename.c_str(), error);
       OS << "#include <upcr.h>\n";
 
-      Trans.PrintDefines(OS);
       Trans.PrintIncludes(OS);
 
       OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
