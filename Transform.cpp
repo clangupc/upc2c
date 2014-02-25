@@ -450,7 +450,7 @@ namespace {
 	  }
 	  Result.ArrayDimension *= TAT->getSize();
 	} else if(const VariableArrayType *VAT = dyn_cast<VariableArrayType>(AT)) {
-	  Expr *Val = BuildParens(VAT->getSizeExpr()).get();
+	  Expr *Val = BuildParens(TransformExpr(VAT->getSizeExpr()).get()).get();
 	  if(Result.E) {
 	    Result.E = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Result.E, Val).get();
 	  } else {
