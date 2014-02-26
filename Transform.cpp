@@ -1327,6 +1327,36 @@ namespace {
 	return TreeTransformUPC::TransformDecayedType(TLB, TL);
       }
     }
+    QualType TransformUPCThreadArrayType(TypeLocBuilder &TLB, UPCThreadArrayTypeLoc TL) {
+      // Translate UPCThreadArrayType into a VariableArrayType
+      const UPCThreadArrayType *T = TL.getTypePtr();
+      QualType ElementType = getDerived().TransformType(TLB, TL.getElementLoc());
+      if (ElementType.isNull())
+	return QualType();
+
+      QualType Result = TL.getType();
+
+      Expr *Size = IntegerLiteral::Create(SemaRef.Context, T->getSize(), SemaRef.Context.getSizeType(), SourceLocation());
+      if(T->getThread()) {
+	std::vector<Expr*> args;
+	Expr *Threads = BuildUPCRCall(Decls->upcr_threads, args).get();
+	Size = MaybeAddParensForMultiply(Size);
+	Size = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Size, Threads).get();
+      }
+
+      Result = RebuildVariableArrayType(ElementType,
+					T->getSizeModifier(),
+					Size,
+					T->getIndexTypeCVRQualifiers(),
+					TL.getBracketsRange());
+
+      ArrayTypeLoc NewTL = TLB.push<ArrayTypeLoc>(Result);
+      NewTL.setLBracketLoc(TL.getLBracketLoc());
+      NewTL.setRBracketLoc(TL.getRBracketLoc());
+      NewTL.setSizeExpr(Size);
+
+      return Result;
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(isa<NamedDecl>(D) && cast<NamedDecl>(D)->getIdentifier() == &SemaRef.Context.Idents.get("__builtin_va_list")) {
 	return SemaRef.Context.getBuiltinVaListDecl();
