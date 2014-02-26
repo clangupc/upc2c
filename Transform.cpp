@@ -1515,6 +1515,7 @@ namespace {
 		*OutIt = cast<NamedDecl>(TransformDecl(SourceLocation(), *chain_iter));
 	      }
 	      IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), TransformType(IFD->getType()), Chaining, IFD->getChainingSize());
+	      NewIFD->setImplicit(true);
 	      transformedLocalDecl(IFD, NewIFD);
 	      Result->addDecl(NewIFD);
 	    } else {
