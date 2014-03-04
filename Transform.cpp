@@ -397,9 +397,23 @@ namespace {
 
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
     typedef TreeTransform<RemoveUPCTransform> TreeTransformUPC;
+  private:
+    bool haveOffsetOf;
+    bool haveVAArg;
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
       : TreeTransformUPC(S), AnonRecordID(0), Decls(D), FileString(fileid) {
+      haveOffsetOf = haveVAArg = false;
+    }
+    bool HaveOffsetOf() { return haveOffsetOf; }
+    ExprResult TransformOffsetOfExpr(OffsetOfExpr *E) {
+      haveOffsetOf = true;
+      return TreeTransformUPC::TransformOffsetOfExpr(E);
+    }
+    bool HaveVAArg() { return haveVAArg; }
+    ExprResult TransformVAArgExpr(VAArgExpr *E) {
+      haveVAArg = true;
+      return TreeTransformUPC::TransformVAArgExpr(E);
     }
     bool AlwaysRebuild() { return true; }
     ExprResult BuildParens(Expr * E) {
@@ -1364,10 +1378,17 @@ namespace {
 	return TransformTranslationUnitDecl(TUD);
       } else if(FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
 	DeclarationNameInfo FnName = FD->getNameInfo();
+	DeclarationName Name = FnName.getName();
 	bool isMain = false;
-	if(FnName.getName() == &SemaRef.Context.Idents.get("main")) {
+	if(Name == &SemaRef.Context.Idents.get("main")) {
 	  FnName.setName(&SemaRef.Context.Idents.get("user_main"));
 	  isMain = true;
+	} else if(Name == &SemaRef.Context.Idents.get("__builtin_va_start")) {
+	  FnName.setName(&SemaRef.Context.Idents.get("va_start"));
+	} else if(Name == &SemaRef.Context.Idents.get("__builtin_va_end")) {
+	  FnName.setName(&SemaRef.Context.Idents.get("va_end"));
+	} else if(Name == &SemaRef.Context.Idents.get("__builtin_va_copy")) {
+	  FnName.setName(&SemaRef.Context.Idents.get("va_copy"));
 	}
 
 	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? TransformType(FD->getTypeSourceInfo()) : 0;
@@ -1889,7 +1910,20 @@ namespace {
       Trans.PrintIncludes(OS);
 
       OS << "#ifndef UPCR_TRANS_EXTRA_INCL\n"
-	"#define UPCR_TRANS_EXTRA_INCL\n"
+	"#define UPCR_TRANS_EXTRA_INCL\n";
+      if (Trans.HaveVAArg()) { // subclass of Expr - cannot be renamed directly
+        OS <<
+	  "#ifndef __builtin_va_arg\n"
+	  "#define __builtin_va_arg(_a1,_a2) va_arg(_a1,_a2)\n"
+	  "#endif\n";
+      }
+      if (Trans.HaveOffsetOf()) { // subclass of Expr - cannot be renamed directly
+        OS <<
+	  "#ifndef __builtin_offsetof\n"
+	  "#define __builtin_offsetof(_a1,_a2) offsetof(_a1,_a2)\n"
+	  "#endif\n";
+      }
+      OS <<
 	"int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n"
 	"#ifndef UPCR_EXIT_FUNCTION\n"
 	"#define UPCR_EXIT_FUNCTION() ((void)0)\n"
