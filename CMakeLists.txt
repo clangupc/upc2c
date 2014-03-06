@@ -3,10 +3,10 @@ set(LLVM_LINK_COMPONENTS
   support
   )
 
-add_clang_executable(upc2c Transform.cpp)
+add_clang_executable(clang-upc2c Transform.cpp)
 
-target_link_libraries(upc2c
+target_link_libraries(clang-upc2c
   clangTooling clangBasic)
 
-install(TARGETS upc2c
+install(TARGETS clang-upc2c
   RUNTIME DESTINATION bin)
