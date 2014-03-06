@@ -1926,9 +1926,6 @@ namespace {
       }
       OS <<
 	"int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n"
-	"#ifndef UPCR_EXIT_FUNCTION\n"
-	"#define UPCR_EXIT_FUNCTION() ((void)0)\n"
-	"#endif\n"
 	"#define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
 	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads), (elemsz), #sptr, (typestr) }\n"
 	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
