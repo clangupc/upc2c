@@ -1503,6 +1503,7 @@ namespace {
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
 					    VD->getStorageClass());
+	  transformedLocalDecl(D, result);
 	  if(Expr *Init = VD->getInit()) {
 	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit(), false);
 	  }
