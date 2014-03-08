@@ -1116,7 +1116,13 @@ namespace {
 	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
 
-      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcrt_forall_control).get()), NULL, PlainFor.get(), SourceLocation(), UPCForWrapper.get());
+      StmtResult PlainForWrapper;
+      {
+	Sema::CompoundScopeRAII BodyScope(SemaRef);
+	PlainForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PlainFor.get(), false);
+      }
+
+      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcrt_forall_control).get()), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
     }
     ExprResult TransformCondition(Expr *E) {
       ExprResult Result = TransformExpr(E);
