@@ -85,6 +85,7 @@ namespace {
     FunctionDecl * upcr_hasMyAffinity_pshared;
     FunctionDecl * upcr_hasMyAffinity_shared;
     FunctionDecl * UPCR_BEGIN_FUNCTION;
+    FunctionDecl * UPCR_EXIT_FUNCTION;
     FunctionDecl * UPCRT_STARTUP_PSHALLOC;
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
@@ -318,6 +319,10 @@ namespace {
       // UPCR_BEGIN_FUNCTION
       {
 	UPCR_BEGIN_FUNCTION = CreateFunction(Context, "UPCR_BEGIN_FUNCTION", Context.VoidTy, NULL, 0);
+      }
+      // UPCR_EXIT_FUNCTION
+      {
+	UPCR_EXIT_FUNCTION = CreateFunction(Context, "UPCR_EXIT_FUNCTION", Context.VoidTy, NULL, 0);
       }
       // UPCRT_STARTUP_PSHALLOC
       {
@@ -1232,6 +1237,14 @@ namespace {
 					      S->getRBracLoc(),
 					      IsStmtExpr);
     }
+    StmtResult TransformReturnStmt(ReturnStmt * S) {
+      StmtResult result = TreeTransform::TransformReturnStmt(S);
+      SmallVector<Stmt*, 2> Statements;
+      std::vector<Expr*> args;
+      Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
+      Statements.push_back(result.get());
+      return SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
+    }
     StmtResult TransformUPCPragmaStmt(UPCPragmaStmt *) {
       // #pragma upc should be stripped out
       return SemaRef.ActOnNullStmt(SourceLocation());
@@ -1448,6 +1461,10 @@ namespace {
 	    LocalTemps.clear();
 	    // Insert the user code
 	    Body.push_back(UserBody);
+	    {
+	      std::vector<Expr*> args;
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
+	    }
 	    if(isMain)
 	      Body.push_back(SemaRef.ActOnReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
 	    FnBody = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get();
