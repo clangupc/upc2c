@@ -1238,7 +1238,7 @@ namespace {
 					      IsStmtExpr);
     }
     StmtResult TransformReturnStmt(ReturnStmt * S) {
-      StmtResult result = TreeTransform::TransformReturnStmt(S);
+      StmtResult result = TreeTransformUPC::TransformReturnStmt(S);
       SmallVector<Stmt*, 2> Statements;
       std::vector<Expr*> args;
       Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
