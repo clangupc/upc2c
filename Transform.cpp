@@ -628,6 +628,47 @@ namespace {
     IntegerLiteral *CreateInteger(QualType Ty, int Value) {
       return IntegerLiteral::Create(SemaRef.Context, APInt(SemaRef.Context.getTypeSize(Ty), Value), Ty, SourceLocation());
     }
+    bool isLiteralInt(const Expr *E, uint64_t value) {
+      const IntegerLiteral *Lit = dyn_cast<IntegerLiteral>(E->IgnoreParenCasts());
+      return (Lit && Lit->getValue() == value);
+    }
+    Expr *FoldUPCRLoadStore(Expr* &E, bool &Phaseless) {
+      Expr *Offset = NULL;
+      while (CallExpr *CE = dyn_cast<CallExpr>(E)) {
+        FunctionDecl *FD = CE->getDirectCallee();
+        if (FD == Decls->UPCR_SHARED_TO_PSHARED || FD == Decls->UPCR_PSHARED_TO_SHARED) {
+          // Fold phased/phaseless conversion into choice of Accessor
+          E = CE->getArg(0);
+          Phaseless = !Phaseless;
+        } else if ((FD == Decls->UPCR_ADD_PSHARED1 || FD == Decls->UPCR_ADD_SHARED || FD == Decls->UPCR_ADD_PSHAREDI) && isLiteralInt(CE->getArg(2),0)) {
+          // Remove 0-increment address arithmetic
+          assert(!CE->getArg(1)->HasSideEffects(SemaRef.Context));
+          E = CE->getArg(0);
+        } else if (FD == Decls->UPCR_ADD_PSHAREDI) {
+          // Fold (non-zero) indefinite address arithmetic into the Offset
+          E = CE->getArg(0);
+          Expr *Elemsz = CE->getArg(1);
+          Expr *Inc = CE->getArg(2);
+	  Expr *NewOffset;
+          if (isLiteralInt(Elemsz,1)) {
+            NewOffset = Inc;
+          } else {
+            Elemsz = MaybeAddParensForMultiply(Elemsz);
+            Inc = MaybeAddParensForMultiply(Inc);
+	    NewOffset = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Elemsz, Inc).get();
+          }
+          if (Offset) {
+            Offset = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Offset, NewOffset).get();
+          } else {
+            Offset = NewOffset;
+          }
+        } else {
+          break;
+        }
+      }
+      if (Offset) return Offset;
+      return CreateInteger(SemaRef.Context.getSizeType(), 0);
+    }
     ExprResult BuildUPCRLoad(Expr * E, QualType ResultType, QualType Ty) {
       std::pair<Expr *, Expr *> LoadAndVar = BuildUPCRLoadParts(E, ResultType, Ty);
       return BuildParens(BuildComma(LoadAndVar.first, LoadAndVar.second).get());
@@ -635,10 +676,11 @@ namespace {
     // Returns a pair containing the load stmt and a declrefexpr to the
     // temporary variable created.
     std::pair<Expr *, Expr *> BuildUPCRLoadParts(Expr * E, QualType ResultType, QualType Ty) {
-      int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
       Qualifiers Quals = Ty.getQualifiers();
       bool Phaseless = isPhaseless(Ty);
       bool Strict = Quals.hasStrict();
+      // Try to fold offset and phased/phaseless conversions:
+      Expr *Offset = FoldUPCRLoadStore(E, Phaseless);
       // Select the correct function to call
       FunctionDecl *Accessor;
       if(Phaseless) {
@@ -655,14 +697,11 @@ namespace {
 	}
       }
       VarDecl *TmpVar = CreateTmpVar(TransformType(ResultType));
-      // FIXME: Handle other layout qualifiers
       std::vector<Expr*> args;
       args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
       args.push_back(E);
-      // offset
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
-      // size
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(Offset);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
       Expr *Load = BuildUPCRCall(Accessor, args).get();
       return std::make_pair(Load, CreateSimpleDeclRef(TmpVar));
     }
@@ -730,10 +769,11 @@ namespace {
       return ExprError();
     }
     ExprResult BuildUPCRStore(Expr * LHS, Expr * RHS, QualType Ty, bool ReturnValue = true) {
-      int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
       Qualifiers Quals = Ty.getQualifiers(); 
       bool Phaseless = isPhaseless(Ty);
       bool Strict = Quals.hasStrict();
+      // Try to fold offset and phased/phaseless conversions:
+      Expr *Offset = FoldUPCRLoadStore(LHS, Phaseless);
       // Select the correct function to call
       FunctionDecl *Accessor;
       if(Phaseless) {
@@ -753,11 +793,9 @@ namespace {
       Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
       std::vector<Expr*> args;
       args.push_back(LHS);
-      // offset
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, 0), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(Offset);
       args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
-      // size
-      args.push_back(IntegerLiteral::Create(SemaRef.Context, APInt(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()), SemaRef.Context.getSizeType(), SourceLocation()));
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
       Expr *Store = BuildUPCRCall(Accessor, args).get();
       Expr *CommaRHS = Store;
       if(ReturnValue) {
