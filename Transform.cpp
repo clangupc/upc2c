@@ -517,7 +517,8 @@ namespace {
       if(isAnon) {
 	ID = IntegerLiteral::Create(Context, APInt(32, 0), Context.IntTy, SourceLocation());
       } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(ID)) {
-	if(isPointerToShared(ICE->getSubExpr()->getType())) {
+	QualType Ty = ICE->getSubExpr()->getType();
+	if(isPointerToShared(Ty) || Ty.getQualifiers().hasShared()) {
 	  ID = TransformExpr(ID).get();
 	} else {
 	  ID = TransformExpr(ICE->getSubExpr()).get();
