@@ -517,15 +517,19 @@ namespace {
       if(isAnon) {
 	ID = IntegerLiteral::Create(Context, APInt(32, 0), Context.IntTy, SourceLocation());
       } else if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(ID)) {
-	ID = TransformExpr(ICE->getSubExpr()).get();
-	TypeSourceInfo *Type;
-	if(ICE->getCastKind() == CK_PointerToIntegral) {
-	  // Pointer types get 2 casts; this one silences "narrowing" warnings
-	  Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
+	if(isPointerToShared(ICE->getSubExpr()->getType())) {
+	  ID = TransformExpr(ID).get();
+	} else {
+	  ID = TransformExpr(ICE->getSubExpr()).get();
+	  TypeSourceInfo *Type;
+	  if(ICE->getCastKind() == CK_PointerToIntegral) {
+	    // Pointer types get 2 casts; this one silences "narrowing" warnings
+	    Type = Context.getTrivialTypeSourceInfo(Context.getIntPtrType());
+	    ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
+	  }
+	  Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
 	  ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
 	}
-	Type = Context.getTrivialTypeSourceInfo(Context.IntTy);
-	ID = SemaRef.BuildCStyleCastExpr(SourceLocation(), Type, SourceLocation(), ID).get();
       } else {
 	ID = TransformExpr(ID).get();
       }
