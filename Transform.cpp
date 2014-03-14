@@ -649,13 +649,13 @@ namespace {
           E = CE->getArg(0);
           Expr *Elemsz = CE->getArg(1);
           Expr *Inc = CE->getArg(2);
-	  Expr *NewOffset;
+          Expr *NewOffset;
           if (isLiteralInt(Elemsz,1)) {
             NewOffset = Inc;
           } else {
             Elemsz = MaybeAddParensForMultiply(Elemsz);
             Inc = MaybeAddParensForMultiply(Inc);
-	    NewOffset = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Elemsz, Inc).get();
+            NewOffset = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, Elemsz, Inc).get();
           }
           if (Offset) {
             Offset = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Offset, NewOffset).get();
