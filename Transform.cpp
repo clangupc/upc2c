@@ -822,19 +822,27 @@ namespace {
 	  Accessor = Decls->UPCR_PUT_SHARED;
 	}
       }
-      VarDecl *TmpVar = CreateTmpVar(TransformType(Ty).getUnqualifiedType());
-      Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
       std::vector<Expr*> args;
       args.push_back(LHS);
       args.push_back(Offset);
-      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
-      args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
-      Expr *Store = BuildUPCRCall(Accessor, args).get();
-      Expr *CommaRHS = Store;
-      if(ReturnValue) {
-	CommaRHS = BuildComma(Store, CreateSimpleDeclRef(TmpVar)).get();
+      IntegerLiteral *Size = CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity());
+      if (RHS->isLValue() && !RHS->HasSideEffects(SemaRef.Context)) {
+	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get());
+	args.push_back(Size);
+	ExprResult Result = BuildUPCRCall(Accessor, args);
+	return ReturnValue? BuildParens(BuildComma(Result.get(), RHS).get()) : Result;
+      } else {
+	VarDecl *TmpVar = CreateTmpVar(TransformType(Ty).getUnqualifiedType());
+	Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
+	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
+	args.push_back(Size);
+	Expr *Store = BuildUPCRCall(Accessor, args).get();
+	Expr *CommaRHS = Store;
+	if(ReturnValue) {
+	  CommaRHS = BuildComma(Store, CreateSimpleDeclRef(TmpVar)).get();
+	}
+	return BuildParens(BuildComma(SetTmp, CommaRHS).get());
       }
-      return BuildParens(BuildComma(SetTmp, CommaRHS).get());
     }
     ExprResult CreateUPCPointerArithmetic(Expr *Ptr, Expr *IntVal, QualType PtrTy) {
       QualType PointeeType = PtrTy->getAs<PointerType>()->getPointeeType();
