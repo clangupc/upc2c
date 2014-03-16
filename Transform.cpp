@@ -822,27 +822,46 @@ namespace {
 	  Accessor = Decls->UPCR_PUT_SHARED;
 	}
       }
+      Expr *SetTmp = NULL;
+      Expr *SrcAddr = NULL;
+      Expr *RetVal = NULL;
+      QualType ResultType = TransformType(Ty).getUnqualifiedType();
+      // TODO: Comparision of CanonicalType is too conservative, requiring a
+      //       temporary copy when signed-vs-unsigned is the only difference.
+      //       However, relaxing this will require adding appropriate cases.
+      // TODO: Use value-based Puts for scalars (up to the associated max size),
+      //       thus leaving the existing code to handle just "bulk" data.
+      if (!RHS->isLValue() ||
+	  (ResultType.getCanonicalType() != RHS->getType().getCanonicalType()) ||
+	  (ReturnValue && RHS->getType().isVolatileQualified())) {
+	// Save value of RHS in a temporary
+	VarDecl *TmpVar = CreateTmpVar(ResultType);
+	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
+	SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get();
+	if(ReturnValue) RetVal = CreateSimpleDeclRef(TmpVar);
+      } else if (ReturnValue && RHS->HasSideEffects(SemaRef.Context)) {
+	// Save address of RHS in a temporary to avoid multiple evaluation
+	VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(ResultType));
+	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpPtr), SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get()).get();
+	SrcAddr = CreateSimpleDeclRef(TmpPtr);
+	if(ReturnValue) RetVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, CreateSimpleDeclRef(TmpPtr)).get();
+      } else {
+	// Safe to use RHS directly
+	SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get();
+	if(ReturnValue) RetVal = RHS; // FIXME: safe to use twice?  Should make a copy?
+      }
       std::vector<Expr*> args;
       args.push_back(LHS);
       args.push_back(Offset);
-      IntegerLiteral *Size = CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity());
-      if (RHS->isLValue() && !RHS->HasSideEffects(SemaRef.Context)) {
-	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get());
-	args.push_back(Size);
-	ExprResult Result = BuildUPCRCall(Accessor, args);
-	return ReturnValue? BuildParens(BuildComma(Result.get(), RHS).get()) : Result;
-      } else {
-	VarDecl *TmpVar = CreateTmpVar(TransformType(Ty).getUnqualifiedType());
-	Expr *SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
-	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
-	args.push_back(Size);
-	Expr *Store = BuildUPCRCall(Accessor, args).get();
-	Expr *CommaRHS = Store;
-	if(ReturnValue) {
-	  CommaRHS = BuildComma(Store, CreateSimpleDeclRef(TmpVar)).get();
-	}
-	return BuildParens(BuildComma(SetTmp, CommaRHS).get());
+      args.push_back(SrcAddr);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
+      ExprResult Result = BuildUPCRCall(Accessor, args);
+      if(SetTmp || RetVal) {
+	if(SetTmp) Result = BuildComma(SetTmp, Result.get());
+	if(RetVal) Result = BuildComma(Result.get(), RetVal);
+	Result = BuildParens(Result.get());
       }
+      return Result;
     }
     ExprResult CreateUPCPointerArithmetic(Expr *Ptr, Expr *IntVal, QualType PtrTy) {
       QualType PointeeType = PtrTy->getAs<PointerType>()->getPointeeType();
