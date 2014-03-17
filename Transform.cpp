@@ -75,6 +75,22 @@ namespace {
     return QualType();
   }
 
+  // FIXME: surely there is a better way to express this in C++:
+  typedef FunctionDecl **UPCRCommFn;
+  typedef enum {
+    CFNK_PSHARED = 0,
+    CFNK_PSHARED_STRICT,
+    CFNK_SHARED,
+    CFNK_SHARED_STRICT
+  } UPCRCommGroupKind;
+  inline UPCRCommGroupKind getCommKind(bool Phaseless, bool Strict) {
+    return Phaseless? (Strict? CFNK_PSHARED_STRICT : CFNK_PSHARED)
+                    : (Strict? CFNK_SHARED_STRICT  : CFNK_SHARED);
+  }
+  inline FunctionDecl *getCommFunction(UPCRCommFn CommGroup, bool Phaseless, bool Strict) {
+    return CommGroup[getCommKind(Phaseless, Strict)];
+  }
+
   struct UPCRDecls {
     FunctionDecl * upcr_notify;
     FunctionDecl * upcr_wait;
@@ -90,26 +106,6 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * upcr_startup_shalloc;
-    FunctionDecl * UPCR_GET_PSHARED;
-    FunctionDecl * UPCR_GET_SHARED;
-    FunctionDecl * UPCR_GET_PSHARED_STRICT;
-    FunctionDecl * UPCR_GET_SHARED_STRICT;
-    FunctionDecl * UPCR_PUT_PSHARED;
-    FunctionDecl * UPCR_PUT_SHARED;
-    FunctionDecl * UPCR_PUT_PSHARED_STRICT;
-    FunctionDecl * UPCR_PUT_SHARED_STRICT;
-    FunctionDecl * UPCR_PUT_PSHARED_IVAL;
-    FunctionDecl * UPCR_PUT_SHARED_IVAL;
-    FunctionDecl * UPCR_PUT_PSHARED_IVAL_STRICT;
-    FunctionDecl * UPCR_PUT_SHARED_IVAL_STRICT;
-    FunctionDecl * UPCR_PUT_PSHARED_FVAL;
-    FunctionDecl * UPCR_PUT_SHARED_FVAL;
-    FunctionDecl * UPCR_PUT_PSHARED_FVAL_STRICT;
-    FunctionDecl * UPCR_PUT_SHARED_FVAL_STRICT;
-    FunctionDecl * UPCR_PUT_PSHARED_DVAL;
-    FunctionDecl * UPCR_PUT_SHARED_DVAL;
-    FunctionDecl * UPCR_PUT_PSHARED_DVAL_STRICT;
-    FunctionDecl * UPCR_PUT_SHARED_DVAL_STRICT;
     FunctionDecl * UPCR_ADD_SHARED;
     FunctionDecl * UPCR_ADD_PSHAREDI;
     FunctionDecl * UPCR_ADD_PSHARED1;
@@ -132,6 +128,11 @@ namespace {
     FunctionDecl * UPCR_SHARED_RESETPHASE;
     FunctionDecl * UPCR_ADDRFIELD_SHARED;
     FunctionDecl * UPCR_ADDRFIELD_PSHARED;
+    FunctionDecl * UPCR_GET[4];
+    FunctionDecl * UPCR_PUT[4];
+    FunctionDecl * UPCR_PUT_IVAL[4];
+    FunctionDecl * UPCR_PUT_FVAL[4];
+    FunctionDecl * UPCR_PUT_DVAL[4];
     VarDecl * upcrt_forall_control;
     VarDecl * upcr_null_shared;
     VarDecl * upcr_null_pshared;
@@ -193,106 +194,6 @@ namespace {
       {
 	QualType argTypes[] = { upcr_shared_ptr_t };
 	upcr_hasMyAffinity_shared = CreateFunction(Context, "upcr_hasMyAffinity_shared", Context.IntTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_GET_PSHARED
-      {
-	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_PSHARED = CreateFunction(Context, "upcr_get_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_GET_SHARED
-      {
-	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_SHARED = CreateFunction(Context, "upcr_get_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_GET_PSHARED_STRICT
-      {
-	QualType argTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_PSHARED_STRICT = CreateFunction(Context, "upcr_get_pshared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_GET_SHARED_STRICT
-      {
-	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
-	UPCR_GET_SHARED_STRICT = CreateFunction(Context, "upcr_get_shared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_PSHARED = CreateFunction(Context, "upcr_put_pshared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_SHARED = CreateFunction(Context, "upcr_put_shared", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_STRICT
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_PSHARED_STRICT = CreateFunction(Context, "upcr_put_pshared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_STRICT
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
-	UPCR_PUT_SHARED_STRICT = CreateFunction(Context, "upcr_put_shared_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_IVAL
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
-	UPCR_PUT_PSHARED_IVAL = CreateFunction(Context, "upcr_put_pshared_val", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_IVAL
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
-	UPCR_PUT_SHARED_IVAL = CreateFunction(Context, "upcr_put_shared_val", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_IVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
-	UPCR_PUT_PSHARED_IVAL_STRICT = CreateFunction(Context, "upcr_put_pshared_val_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_IVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
-	UPCR_PUT_SHARED_IVAL_STRICT = CreateFunction(Context, "upcr_put_shared_val_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_FVAL
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.FloatTy };
-	UPCR_PUT_PSHARED_FVAL = CreateFunction(Context, "upcr_put_pshared_floatval", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_FVAL
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.FloatTy };
-	UPCR_PUT_SHARED_FVAL = CreateFunction(Context, "upcr_put_shared_floatval", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_FVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.FloatTy };
-	UPCR_PUT_PSHARED_FVAL_STRICT = CreateFunction(Context, "upcr_put_pshared_floatval_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_FVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.FloatTy };
-	UPCR_PUT_SHARED_FVAL_STRICT = CreateFunction(Context, "upcr_put_shared_floatval_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_DVAL
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.DoubleTy };
-	UPCR_PUT_PSHARED_DVAL = CreateFunction(Context, "upcr_put_pshared_doubleval", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_DVAL
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.DoubleTy };
-	UPCR_PUT_SHARED_DVAL = CreateFunction(Context, "upcr_put_shared_doubleval", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_PSHARED_DVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.DoubleTy };
-	UPCR_PUT_PSHARED_DVAL_STRICT = CreateFunction(Context, "upcr_put_pshared_doubleval_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
-      }
-      // UPCR_PUT_SHARED_DVAL_STRICT
-      {
-	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.DoubleTy };
-	UPCR_PUT_SHARED_DVAL_STRICT = CreateFunction(Context, "upcr_put_shared_doubleval_strict", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_ADD_SHARED
       {
@@ -431,6 +332,51 @@ namespace {
       {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
 	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // UPCR_GET_{,P}SHARED{,_STRICT}
+      {
+	QualType pargTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET[CFNK_PSHARED] = CreateFunction(Context, "upcr_get_pshared", Context.VoidTy, pargTypes, 4);
+	UPCR_GET[CFNK_PSHARED_STRICT] = CreateFunction(Context, "upcr_get_pshared_strict", Context.VoidTy, pargTypes, 4);
+	QualType argTypes[] = { Context.VoidPtrTy, upcr_shared_ptr_t, Context.IntTy, Context.IntTy };
+	UPCR_GET[CFNK_SHARED] = CreateFunction(Context, "upcr_get_shared", Context.VoidTy, argTypes, 4);
+	UPCR_GET[CFNK_SHARED_STRICT] = CreateFunction(Context, "upcr_get_shared_strict", Context.VoidTy, argTypes, 4);
+      }
+      // UPCR_PUT_{,P}SHARED{,_STRICT}
+      {
+	QualType pargTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
+	UPCR_PUT[CFNK_PSHARED] = CreateFunction(Context, "upcr_put_pshared", Context.VoidTy, pargTypes, 4);
+	UPCR_PUT[CFNK_PSHARED_STRICT] = CreateFunction(Context, "upcr_put_pshared_strict", Context.VoidTy, pargTypes, 4);
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.VoidPtrTy, Context.IntTy };
+	UPCR_PUT[CFNK_SHARED] = CreateFunction(Context, "upcr_put_shared", Context.VoidTy, argTypes, 4);
+	UPCR_PUT[CFNK_SHARED_STRICT] = CreateFunction(Context, "upcr_put_shared_strict", Context.VoidTy, argTypes, 4);
+      }
+      // UPCR_PUT_{,P}SHARED_IVAL{,_STRICT}
+      {
+	QualType pargTypes[] = { upcr_pshared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
+	UPCR_PUT_IVAL[CFNK_PSHARED] = CreateFunction(Context, "upcr_put_pshared_val", Context.VoidTy, pargTypes, 4);
+	UPCR_PUT_IVAL[CFNK_PSHARED_STRICT] = CreateFunction(Context, "upcr_put_pshared_val_strict", Context.VoidTy, pargTypes, 4);
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, upcr_register_value_t, Context.IntTy };
+	UPCR_PUT_IVAL[CFNK_SHARED] = CreateFunction(Context, "upcr_put_shared_val", Context.VoidTy, argTypes, 4);
+	UPCR_PUT_IVAL[CFNK_SHARED_STRICT] = CreateFunction(Context, "upcr_put_shared_val_strict", Context.VoidTy, argTypes, 4);
+      }
+      // UPCR_PUT_{,P}SHARED_FVAL{,_STRICT}
+      {
+	QualType pargTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.FloatTy };
+	UPCR_PUT_FVAL[CFNK_PSHARED] = CreateFunction(Context, "upcr_put_pshared_floatval", Context.VoidTy, pargTypes, 3);
+	UPCR_PUT_FVAL[CFNK_PSHARED_STRICT] = CreateFunction(Context, "upcr_put_pshared_floatval_strict", Context.VoidTy, pargTypes, 3);
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.FloatTy };
+	UPCR_PUT_FVAL[CFNK_SHARED] = CreateFunction(Context, "upcr_put_shared_floatval", Context.VoidTy, argTypes, 3);
+	UPCR_PUT_FVAL[CFNK_SHARED_STRICT] = CreateFunction(Context, "upcr_put_shared_floatval_strict", Context.VoidTy, argTypes, 3);
+      }
+      // UPCR_PUT_{,P}SHARED_DVAL{,_STRICT}
+      {
+	QualType pargTypes[] = { upcr_pshared_ptr_t, Context.IntTy, Context.DoubleTy };
+	UPCR_PUT_DVAL[CFNK_PSHARED] = CreateFunction(Context, "upcr_put_pshared_doubleval", Context.VoidTy, pargTypes, 3);
+	UPCR_PUT_DVAL[CFNK_PSHARED_STRICT] = CreateFunction(Context, "upcr_put_pshared_doubleval_strict", Context.VoidTy, pargTypes, 3);
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.IntTy, Context.DoubleTy };
+	UPCR_PUT_DVAL[CFNK_SHARED] = CreateFunction(Context, "upcr_put_shared_doubleval", Context.VoidTy, argTypes, 3);
+	UPCR_PUT_DVAL[CFNK_SHARED_STRICT] = CreateFunction(Context, "upcr_put_shared_doubleval_strict", Context.VoidTy, argTypes, 3);
       }
       // upcrt_forall_control
       {
@@ -783,28 +729,13 @@ namespace {
       bool Strict = Quals.hasStrict();
       // Try to fold offset and phased/phaseless conversions:
       Expr *Offset = FoldUPCRLoadStore(E, Phaseless);
-      // Select the correct function to call
-      FunctionDecl *Accessor;
-      if(Phaseless) {
-	if(Strict) {
-	  Accessor = Decls->UPCR_GET_PSHARED_STRICT;
-	} else {
-	  Accessor = Decls->UPCR_GET_PSHARED;
-	}
-      } else {
-	if(Strict) {
-	  Accessor = Decls->UPCR_GET_SHARED_STRICT;
-	} else {
-	  Accessor = Decls->UPCR_GET_SHARED;
-	}
-      }
       VarDecl *TmpVar = CreateTmpVar(TransformType(ResultType));
       std::vector<Expr*> args;
       args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
       args.push_back(E);
       args.push_back(Offset);
       args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
-      Expr *Load = BuildUPCRCall(Accessor, args).get();
+      Expr *Load = BuildUPCRCall(getCommFunction(Decls->UPCR_GET,Phaseless,Strict), args).get();
       return std::make_pair(Load, CreateSimpleDeclRef(TmpVar));
     }
     ExprResult BuildUPCRSharedToPshared(Expr *Ptr) {
@@ -890,12 +821,7 @@ namespace {
       // Try to fold offset and phased/phaseless conversions:
       Expr *Offset = FoldUPCRLoadStore(LHS, Phaseless);
       // Select the default function to call
-      FunctionDecl *Accessor;
-      if(Phaseless) {
-	Accessor = Strict? Decls->UPCR_PUT_PSHARED_STRICT : Decls->UPCR_PUT_PSHARED;
-      } else {
-	Accessor = Strict? Decls->UPCR_PUT_SHARED_STRICT : Decls->UPCR_PUT_SHARED;
-      }
+      UPCRCommFn Accessor = Decls->UPCR_PUT;
       Expr *SetTmp = NULL;
       Expr *SrcArg = NULL;
       Expr *RetVal = NULL;
@@ -921,27 +847,15 @@ namespace {
 	  if(ReturnValue) RetVal = CreateSimpleDeclRef(TmpVar);
 	}
 	if(ResultType->isSpecificBuiltinType(BuiltinType::Float)) {
-	  if(Phaseless) {
-	    Accessor = Strict? Decls->UPCR_PUT_PSHARED_FVAL_STRICT : Decls->UPCR_PUT_PSHARED_FVAL;
-	  } else {
-	    Accessor = Strict? Decls->UPCR_PUT_SHARED_FVAL_STRICT : Decls->UPCR_PUT_SHARED_FVAL;
-	  }
+	  Accessor = Decls->UPCR_PUT_FVAL;
 	  NeedSize = false;
 	} else if(ResultType->isSpecificBuiltinType(BuiltinType::Double)) {
-	  if(Phaseless) {
-	    Accessor = Strict? Decls->UPCR_PUT_PSHARED_DVAL_STRICT : Decls->UPCR_PUT_PSHARED_DVAL;
-	  } else {
-	    Accessor = Strict? Decls->UPCR_PUT_SHARED_DVAL_STRICT : Decls->UPCR_PUT_SHARED_DVAL;
-	  }
+	  Accessor = Decls->UPCR_PUT_DVAL;
 	  NeedSize = false;
 	} else {
 	  TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Decls->upcr_register_value_t);
 	  SrcArg = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), SrcArg).get();
-	  if(Phaseless) {
-	    Accessor = Strict? Decls->UPCR_PUT_PSHARED_IVAL_STRICT : Decls->UPCR_PUT_PSHARED_IVAL;
-	  } else {
-	    Accessor = Strict? Decls->UPCR_PUT_SHARED_IVAL_STRICT : Decls->UPCR_PUT_SHARED_IVAL;
-	  }
+	  Accessor = Decls->UPCR_PUT_IVAL;
 	}
       } else if (RHS->isLValue() &&
 		 SemaRef.Context.typesAreCompatible(ResultType, RHSType) &&
@@ -972,7 +886,7 @@ namespace {
       if(NeedSize) {
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
       }
-      ExprResult Result = BuildUPCRCall(Accessor, args);
+      ExprResult Result = BuildUPCRCall(getCommFunction(Accessor,Phaseless,Strict), args);
       if(SetTmp || RetVal) {
 	if(SetTmp) Result = BuildComma(SetTmp, Result.get());
 	if(RetVal) Result = BuildComma(Result.get(), RetVal);
@@ -2102,7 +2016,7 @@ namespace {
 	    args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
 	    args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
 	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
-	    PutOnce.push_back(BuildUPCRCall(Phaseless?Decls->UPCR_PUT_PSHARED:Decls->UPCR_PUT_SHARED, args).get());
+	    PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT[Phaseless?CFNK_PSHARED:CFNK_SHARED], args).get());
 	  }
 	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
 	}
