@@ -649,6 +649,17 @@ namespace {
       const IntegerLiteral *Lit = dyn_cast<IntegerLiteral>(E->IgnoreParenCasts());
       return (Lit && Lit->getValue() == value);
     }
+    // Return true if cast between types does not change the representation.
+    // If true, then needCast indicates if the types are not compatible by C99.
+    bool typesAreByteCompatible(QualType Ty1, QualType Ty2, bool &needCast) {
+      Ty1 = Ty1.getCanonicalType();
+      Ty2 = Ty2.getCanonicalType();
+      needCast = !SemaRef.Context.typesAreCompatible(Ty1, Ty2);
+      return !needCast ||
+             ((Ty1->isIntegralOrEnumerationType() || Ty1->isPointerType()) &&
+              (Ty2->isIntegralOrEnumerationType() || Ty2->isPointerType()) &&
+              (SemaRef.Context.getTypeSize(Ty1) == SemaRef.Context.getTypeSize(Ty2)));
+    }
     Expr *FoldUPCRLoadStore(Expr* &E, bool &Phaseless) {
       Expr *Offset = NULL;
       while (CallExpr *CE = dyn_cast<CallExpr>(E->IgnoreParens())) {
@@ -825,23 +836,23 @@ namespace {
       Expr *SetTmp = NULL;
       Expr *SrcAddr = NULL;
       Expr *RetVal = NULL;
+      bool castRetVal = false;
       QualType ResultType = TransformType(Ty).getUnqualifiedType();
-      // TODO: Comparision of CanonicalType is too conservative, requiring a
-      //       temporary copy when signed-vs-unsigned is the only difference.
-      //       However, relaxing this will require adding appropriate cases.
+      QualType RHSType = RHS->getType().getUnqualifiedType();
       // TODO: Use value-based Puts for scalars (up to the associated max size),
       //       thus leaving the existing code to handle just "bulk" data.
       if (!RHS->isLValue() ||
-	  (ResultType.getCanonicalType() != RHS->getType().getCanonicalType()) ||
+	  !typesAreByteCompatible(ResultType, RHSType, castRetVal) ||
 	  (ReturnValue && RHS->getType().isVolatileQualified())) {
 	// Save value of RHS in a temporary
 	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
 	SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get();
 	if(ReturnValue) RetVal = CreateSimpleDeclRef(TmpVar);
+	castRetVal = false;
       } else if (ReturnValue && RHS->HasSideEffects(SemaRef.Context)) {
 	// Save address of RHS in a temporary to avoid multiple evaluation
-	VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(ResultType));
+	VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(RHSType));
 	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpPtr), SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get()).get();
 	SrcAddr = CreateSimpleDeclRef(TmpPtr);
 	if(ReturnValue) RetVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, CreateSimpleDeclRef(TmpPtr)).get();
@@ -858,7 +869,13 @@ namespace {
       ExprResult Result = BuildUPCRCall(Accessor, args);
       if(SetTmp || RetVal) {
 	if(SetTmp) Result = BuildComma(SetTmp, Result.get());
-	if(RetVal) Result = BuildComma(Result.get(), RetVal);
+	if(RetVal) {
+	  if(castRetVal) {
+	    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
+            RetVal = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), RetVal).get();
+	  }
+	  Result = BuildComma(Result.get(), RetVal);
+	}
 	Result = BuildParens(Result.get());
       }
       return Result;
