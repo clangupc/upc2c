@@ -841,25 +841,30 @@ namespace {
       QualType RHSType = RHS->getType().getUnqualifiedType();
       // TODO: Use value-based Puts for scalars (up to the associated max size),
       //       thus leaving the existing code to handle just "bulk" data.
-      if (!RHS->isLValue() ||
-	  !typesAreByteCompatible(ResultType, RHSType, castRetVal) ||
-	  (ReturnValue && RHS->getType().isVolatileQualified())) {
-	// Save value of RHS in a temporary
+      if (RHS->isLValue() &&
+	  typesAreByteCompatible(ResultType, RHSType, castRetVal) &&
+	  !(ReturnValue && RHS->getType().isVolatileQualified())) {
+	if (ReturnValue && RHS->HasSideEffects(SemaRef.Context)) {
+	  // Save address of RHS in a temporary to avoid multiple evaluation
+	  VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(RHSType));
+	  SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpPtr), SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get()).get();
+	  SrcAddr = CreateSimpleDeclRef(TmpPtr);
+	  if(ReturnValue) RetVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, CreateSimpleDeclRef(TmpPtr)).get();
+        } else {
+	  // Safe to use RHS directly
+	  SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get();
+	  if(ReturnValue) RetVal = RHS; // FIXME: safe to use twice?  Should make a copy?
+        }
+	if(ReturnValue && castRetVal) {
+	  TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
+          RetVal = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), RetVal).get();
+	}
+      } else {
+	// Store value of RHS in a temporary
 	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
 	SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get();
 	if(ReturnValue) RetVal = CreateSimpleDeclRef(TmpVar);
-	castRetVal = false;
-      } else if (ReturnValue && RHS->HasSideEffects(SemaRef.Context)) {
-	// Save address of RHS in a temporary to avoid multiple evaluation
-	VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(RHSType));
-	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpPtr), SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get()).get();
-	SrcAddr = CreateSimpleDeclRef(TmpPtr);
-	if(ReturnValue) RetVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, CreateSimpleDeclRef(TmpPtr)).get();
-      } else {
-	// Safe to use RHS directly
-	SrcAddr = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get();
-	if(ReturnValue) RetVal = RHS; // FIXME: safe to use twice?  Should make a copy?
       }
       std::vector<Expr*> args;
       args.push_back(LHS);
@@ -870,10 +875,6 @@ namespace {
       if(SetTmp || RetVal) {
 	if(SetTmp) Result = BuildComma(SetTmp, Result.get());
 	if(RetVal) {
-	  if(castRetVal) {
-	    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
-            RetVal = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), RetVal).get();
-	  }
 	  Result = BuildComma(Result.get(), RetVal);
 	}
 	Result = BuildParens(Result.get());
