@@ -645,7 +645,7 @@ namespace {
     }
     ExprResult TransformImplicitCastExpr(ImplicitCastExpr *E) {
       if(E->getCastKind() == CK_LValueToRValue && E->getSubExpr()->getType().getQualifiers().hasShared()) {
-	return BuildUPCRLoad(TransformExpr(E->getSubExpr()).get(), E->getType().getUnqualifiedType(), E->getSubExpr()->getType());
+	return BuildUPCRLoad(NULL, TransformExpr(E->getSubExpr()).get(), E->getType().getUnqualifiedType(), E->getSubExpr()->getType());
       } else {
 	ExprResult UPCCast = MaybeTransformUPCRCast(E);
 	if(!UPCCast.isInvalid()) {
@@ -717,26 +717,26 @@ namespace {
       if (Offset) return Offset;
       return CreateInteger(SemaRef.Context.getSizeType(), 0);
     }
-    ExprResult BuildUPCRLoad(Expr * E, QualType ResultType, QualType Ty) {
-      std::pair<Expr *, Expr *> LoadAndVar = BuildUPCRLoadParts(E, ResultType, Ty);
-      return BuildParens(BuildComma(LoadAndVar.first, LoadAndVar.second).get());
-    }
-    // Returns a pair containing the load stmt and a declrefexpr to the
-    // temporary variable created.
-    std::pair<Expr *, Expr *> BuildUPCRLoadParts(Expr * E, QualType ResultType, QualType Ty) {
+    Expr *BuildUPCRLoad(Expr * LHS, Expr * E, QualType ResultType, QualType Ty) {
       Qualifiers Quals = Ty.getQualifiers();
       bool Phaseless = isPhaseless(Ty);
       bool Strict = Quals.hasStrict();
+      // Create a LHS if the caller didn't provide one
+      VarDecl *LoadVar = NULL;
+      if (!LHS) {
+	LoadVar = CreateTmpVar(TransformType(ResultType));
+	LHS = CreateSimpleDeclRef(LoadVar);
+      }
       // Try to fold offset and phased/phaseless conversions:
       Expr *Offset = FoldUPCRLoadStore(E, Phaseless);
-      VarDecl *TmpVar = CreateTmpVar(TransformType(ResultType));
       std::vector<Expr*> args;
-      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get());
+      args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, LHS).get());
       args.push_back(E);
       args.push_back(Offset);
       args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
-      Expr *Load = BuildUPCRCall(getCommFunction(Decls->UPCR_GET,Phaseless,Strict), args).get();
-      return std::make_pair(Load, CreateSimpleDeclRef(TmpVar));
+      Expr *Result = BuildUPCRCall(getCommFunction(Decls->UPCR_GET,Phaseless,Strict), args).get();
+      if(LoadVar) Result = BuildParens(BuildComma(Result, CreateSimpleDeclRef(LoadVar)).get()).get();
+      return Result;
     }
     ExprResult BuildUPCRSharedToPshared(Expr *Ptr) {
       CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens());
@@ -936,9 +936,9 @@ namespace {
 	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
 	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
 	Expr * SaveArg = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getSubExpr()).get()).get()).get();
-	std::pair<Expr *, Expr *> Load = BuildUPCRLoadParts(TmpPtr, ArgType.getUnqualifiedType(), ArgType);
-	Expr * LoadExpr = Load.first;
-	Expr * LoadVar = Load.second;
+	QualType ResultType = TransformType(ArgType.getUnqualifiedType());
+	Expr * LoadVar = CreateSimpleDeclRef(CreateTmpVar(ResultType));
+	Expr * LoadExpr = BuildUPCRLoad(LoadVar, TmpPtr, ResultType, ArgType);
 	Expr * NewVal = CreateArithmeticExpr(LoadVar, CreateInteger(SemaRef.Context.IntTy, 1), ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
 
 	if(E->isPrefix()) {
@@ -1076,7 +1076,7 @@ namespace {
 	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
 	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
 	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
-	Expr * LHSVal = BuildUPCRLoad(TmpPtr, Ty.getUnqualifiedType(), Ty).get();
+	Expr * LHSVal = BuildUPCRLoad(NULL, TmpPtr, Ty.getUnqualifiedType(), Ty);
 	Expr * OpResult = CreateArithmeticExpr(LHSVal, RHS, Ty, Opc).get();
 	Expr * Result = BuildUPCRStore(TmpPtr, OpResult, Ty).get();
 	return BuildParens(BuildComma(SaveLHS, Result).get());
