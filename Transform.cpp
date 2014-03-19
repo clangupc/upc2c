@@ -750,6 +750,9 @@ namespace {
       if (Offset) return Offset;
       return CreateInteger(SemaRef.Context.getSizeType(), 0);
     }
+    // If LoadVar is passed, then the result will contain an assignment to it.
+    // Otherwise the result will use a temporary only if necessary.
+    // Regardless, the value of the expression will be the result of the Load.
     Expr *BuildUPCRLoad(Expr * Ptr, QualType Ty, Expr * LoadVar = NULL) {
       Qualifiers Quals = Ty.getQualifiers();
       bool Phaseless = isPhaseless(Ty);
@@ -760,6 +763,7 @@ namespace {
       Expr *Result;
       QualType ResultType = TransformType(Ty).getUnqualifiedType();
       if(typeFitsUPCRValuePutGet(ResultType)) {
+	// Case 1.  Get by value, with type cast if necesssary
 	args.push_back(Ptr);
 	args.push_back(Offset);
 	UPCRCommFn Accessor;
@@ -780,9 +784,9 @@ namespace {
 	  Result = BuildParens(Result).get();
 	}
       } else {
-	// Create a LoadVar if the caller didn't provide one
+	// Case 2.  Get by reference, to callers LoadVar if passed
 	VarDecl *TmpVar = NULL;
-	if (!LoadVar) {
+	if (!LoadVar) { // Create a LoadVar if the caller doesn't provide one
 	  TmpVar = CreateTmpVar(ResultType);
 	  LoadVar = CreateSimpleDeclRef(TmpVar);
 	}
@@ -886,18 +890,16 @@ namespace {
       QualType ResultType = TransformType(Ty).getUnqualifiedType();
       QualType RHSType = RHS->getType().getUnqualifiedType();
       if(typeFitsUPCRValuePutGet(ResultType)) {
-	if (RHS->isLValue() &&
-	    !(ReturnValue && RHS->getType().isVolatileQualified()) &&
-	    !(ReturnValue && RHS->HasSideEffects(SemaRef.Context))) {
-	  // Put RHS by value
+	if (RHS->isLValue() && !ReturnValue) {
+	  // Case 1. Put RHS by value, with type cast if necessary
 	  SrcArg = RHS;
 	  if(!SemaRef.Context.typesAreCompatible(ResultType, RHSType)) {
 	    TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
 	    SrcArg = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), SrcArg).get();
 	  }
-	  if(ReturnValue) RetVal = SrcArg;
 	} else {
-	  // Store value of RHS in a temporary which is Put by value
+	  // Case 2. Store value of RHS in a temporary. which is Put by value
+	  // If(ReturnValue) then the temporary's value is returned
 	  VarDecl *TmpVar = CreateTmpVar(ResultType);
 	  SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
 	  SrcArg = CreateSimpleDeclRef(TmpVar);
@@ -914,23 +916,13 @@ namespace {
 	  SrcArg = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), SrcArg).get();
 	  Accessor = Decls->UPCR_PUT_IVAL;
 	}
-      } else if (RHS->isLValue() &&
-		 SemaRef.Context.typesAreCompatible(ResultType, RHSType) &&
-		 !(ReturnValue && RHS->getType().isVolatileQualified())) {
-	Expr *AddrOfRHS = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get();
-	if (ReturnValue && RHS->HasSideEffects(SemaRef.Context)) {
-	  // Save address of RHS in a temporary to avoid multiple evaluation
-	  VarDecl *TmpPtr = CreateTmpVar(SemaRef.Context.getPointerType(RHSType));
-	  SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpPtr), AddrOfRHS).get();
-	  SrcArg = CreateSimpleDeclRef(TmpPtr);
-	  if(ReturnValue) RetVal = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, CreateSimpleDeclRef(TmpPtr)).get();
-	} else {
-	  // Safe to use RHS directly
-	  SrcArg = AddrOfRHS;
-	  if(ReturnValue) RetVal = RHS;
-	}
+      } else if (RHS->isLValue() && !ReturnValue &&
+		 SemaRef.Context.typesAreCompatible(ResultType, RHSType)) {
+	// Case 3. Put RHS by reference (safe because no return or type conversion required)
+	SrcArg = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, RHS).get();
       } else {
-	// Store value of RHS in a temporary
+	// Case 4. Store value of RHS in a temporary which is Put by reference
+	// If(ReturnValue) then the temporary's value is returned
 	VarDecl *TmpVar = CreateTmpVar(ResultType);
 	SetTmp = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, CreateSimpleDeclRef(TmpVar), RHS).get();
 	SrcArg = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(TmpVar)).get();
