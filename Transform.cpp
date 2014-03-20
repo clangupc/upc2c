@@ -1306,9 +1306,60 @@ namespace {
       // #pragma upc should be stripped out
       return SemaRef.ActOnNullStmt(SourceLocation());
     }
+    // May need to recreate anon structs or unions to reference them by name
+    void maybeCreateAnonType(QualType &Ty) {
+      if(const RecordType *RT = Ty->getAs<RecordType>()) {
+	RecordDecl *RD = RT->getDecl();
+	if(!RD->getIdentifier() && RD->isThisDeclarationADefinition()) {
+	  RecordDecl *& Result = ExtraAnonRecordDecls[RD];
+	  if(Result == NULL) {
+	    std::string Name = (Twine("_bupc_anon_type") + Twine(AnonRecordID++)).str();
+	    Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(),
+					SemaRef.getFunctionLevelDeclContext(),
+					RD->getLocStart(), RD->getLocation(),
+					&SemaRef.Context.Idents.get(Name));
+	    SmallVector<Decl *, 4> Fields;
+	    Result->startDefinition();
+	    Scope CurScope(SemaRef.getCurScope(), Scope::ClassScope|Scope::DeclScope, SemaRef.getDiagnostics());
+	    SemaRef.ActOnTagStartDefinition(&CurScope, Result);
+	    for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
+	      if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
+	        TypeSourceInfo *DI = FD->getTypeSourceInfo();
+	        FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(), FD->getType(), DI, Result, FD->getLocation(), FD->isMutable(), FD->getBitWidth(), FD->getInClassInitStyle(), FD->getInnerLocStart(), FD->getAccess(), 0);
+	        NewFD->setImplicit(FD->isImplicit());
+	        NewFD->setAccess(FD->getAccess());
+	        Result->addDecl(NewFD);
+	        Fields.push_back(NewFD);
+	      } else if(IndirectFieldDecl *IFD = dyn_cast_or_null<IndirectFieldDecl>(*iter)) {
+	        NamedDecl **Chaining = new(SemaRef.Context) NamedDecl*[IFD->getChainingSize()];
+	        NamedDecl **OutIt = Chaining;
+	        for(IndirectFieldDecl::chain_iterator chain_iter = IFD->chain_begin(), chain_end = IFD->chain_end(); chain_iter != chain_end; ++chain_iter, ++OutIt) {
+		  *OutIt = cast<NamedDecl>(*chain_iter);
+	        }
+	        IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), IFD->getType(), Chaining, IFD->getChainingSize());
+	        NewIFD->setImplicit(true);
+	        Result->addDecl(NewIFD);
+	      } else {
+	        // Skip tag forward declarations.
+	        if(TagDecl *TD = dyn_cast<TagDecl>(*iter))
+		  if(!TD->isThisDeclarationADefinition())
+		    continue;
+	        Result->addDecl(*iter);
+	      }
+	    }
+	    SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
+	    SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getRBraceLoc());
+	    LocalStatics.push_back(Result);
+	  }
+	  SubstituteType Sub(SemaRef, Ty, SemaRef.Context.getRecordType(Result));
+	  Ty = Sub.TransformType(Ty);
+	}
+      }
+    }
     VarDecl *CreateTmpVar(QualType Ty) {
       int ID = static_cast<int>(LocalTemps.size());
       std::string name = (llvm::Twine("_bupc_spilld") + llvm::Twine(ID)).str();
+      maybeCreateAnonType(Ty);
       VarDecl *TmpVar = VarDecl::Create(SemaRef.Context, SemaRef.getFunctionLevelDeclContext(), SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(name), Ty, SemaRef.Context.getTrivialTypeSourceInfo(Ty), SC_None);
       LocalTemps.push_back(TmpVar);
       return TmpVar;
@@ -1783,6 +1834,7 @@ namespace {
       return result;
     }
     std::map<Decl*, TypedefDecl*> ExtraAnonTagDecls;
+    std::map<Decl*, RecordDecl*> ExtraAnonRecordDecls;
     std::vector<Stmt*> SplitDecls;
     std::vector<Decl*> LocalStatics;
     UPCRDecls *Decls;
