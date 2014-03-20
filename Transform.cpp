@@ -740,20 +740,40 @@ namespace {
 	QualType DstPointee = E->getType()->getAs<PointerType>()->getPointeeType();
 	QualType SrcPointee = E->getSubExpr()->getType()->getAs<PointerType>()->getPointeeType();
 	FunctionDecl *CastFn = 0;
+	ExprResult Result = TransformExpr(E->getSubExpr());
+	Expr *Arg = Result.get();
+	CallExpr *CE = dyn_cast<CallExpr>(Arg);
+	FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
 	if(isPhaseless(DstPointee) && !isPhaseless(SrcPointee)) {
 	  CastFn = Decls->UPCR_SHARED_TO_PSHARED;
+	  if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
+	    // upcr_shared_to_pshared(pshared_to_shared(p)) -> p
+	    return ExprResult(CE->getArg(0));
+	  } else if(Child == Decls->UPCR_SHARED_RESETPHASE) {
+	    // shared_to_pshared(resetphase(p)) -> shared_to_pshared(p)
+	    Arg = CE->getArg(0);
+	  }
 	} else if(!isPhaseless(DstPointee) && isPhaseless(SrcPointee)) {
 	  CastFn = Decls->UPCR_PSHARED_TO_SHARED;
+	  if(Child == Decls->UPCR_SHARED_TO_PSHARED) {
+	    // pshared_to_shared(shared_to_pshared(p)) -> resetphase(p)
+	    CastFn = Decls->UPCR_SHARED_RESETPHASE;
+	    Arg = CE->getArg(0);
+	  }
 	} else if(!isPhaseless(DstPointee) && !isPhaseless(SrcPointee) &&
 		  E->getCastKind() == CK_UPCBitCastZeroPhase) {
 	  CastFn = Decls->UPCR_SHARED_RESETPHASE;
+	  if(Child == Decls->UPCR_SHARED_RESETPHASE) {
+	    // resetphase(resetphase(p)) -> resetphase(p)
+	    return Result;
+	  }
 	}
 	if(CastFn) {
 	  std::vector<Expr *> args;
-	  args.push_back(TransformExpr(E->getSubExpr()).get());
+	  args.push_back(Arg);
 	  return BuildUPCRCall(CastFn, args);
 	} else {
-	  return TransformExpr(E->getSubExpr());
+	  return Result;
 	}
       } else if(E->getCastKind() == CK_PointerToIntegral &&
 		isPointerToShared(E->getSubExpr()->getType())) {
