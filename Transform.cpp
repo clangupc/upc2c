@@ -1064,9 +1064,23 @@ namespace {
 	ValueDecl * FD = E->getMemberDecl();
 	Expr *NewBase = TransformExpr(Base).get();
 	if(!isPhaseless(BaseType)) {
-	  std::vector<Expr*> args;
-	  args.push_back(NewBase);
-	  NewBase = BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args).get();
+	  // FIXME: factor similar logic in MaybeTransformUPCRCast()?
+	  bool needConversion = true;
+	  CallExpr *CE = dyn_cast<CallExpr>(NewBase);
+	  FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
+	  if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
+	    // upcr_shared_to_pshared(pshared_to_shared(p)) -> p
+	    needConversion = false;
+	    NewBase = CE->getArg(0);
+	  } else if(Child == Decls->UPCR_SHARED_RESETPHASE) {
+	    // shared_to_pshared(resetphase(p)) -> shared_to_pshared(p)
+	    NewBase = CE->getArg(0);
+	  }
+	  if(needConversion) {
+	    std::vector<Expr*> args;
+	    args.push_back(NewBase);
+	    NewBase = BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args).get();
+	  }
 	}
 	CharUnits Offset = SemaRef.Context.toCharUnitsFromBits(SemaRef.Context.getFieldOffset(FD));
 	std::vector<Expr *> args;
