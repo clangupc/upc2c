@@ -845,7 +845,7 @@ namespace {
       args.push_back(Ptr);
       args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
       args.push_back(IntVal);
-      int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+      uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
       if(LayoutQualifier == 0) {
 	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
       } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
@@ -945,7 +945,7 @@ namespace {
 	  args.push_back(TransformExpr(LHS).get());
 	  args.push_back(TransformExpr(RHS).get());
 	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
-	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	  uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	  if(LayoutQualifier == 0) {
 	    Result = BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args);
 	  } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
@@ -992,7 +992,7 @@ namespace {
 	  args.push_back(TransformExpr(LHS).get());
 	  args.push_back(TransformExpr(RHS).get());
 	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
-	  int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	  uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	  Expr *Diff;
 	  if(LayoutQualifier == 0) {
 	    Diff = BuildUPCRCall(Decls->UPCR_SUB_PSHAREDI, args).get();
@@ -1052,7 +1052,7 @@ namespace {
 	args.push_back(TransformExpr(LHS).get());
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
 	args.push_back(IntVal);
-	int LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
+	uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	if(LayoutQualifier == 0) {
 	  return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
 	} else if(LayoutQualifier == 1) {
@@ -1830,7 +1830,7 @@ namespace {
 	  std::vector<Expr*> args;
 	  bool Phaseless = (iter->first->getType() == Decls->upcr_pshared_ptr_t);
 	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, iter->first->getType(), VK_LValue, SourceLocation()).get());
-	  int LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
+	  uint32_t LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
 	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
 	  bool hasThread = false;
 	  QualType ElemTy = iter->second->getType().getCanonicalType();
