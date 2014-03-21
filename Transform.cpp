@@ -1066,7 +1066,7 @@ namespace {
 	if(!isPhaseless(BaseType)) {
 	  // FIXME: factor similar logic in MaybeTransformUPCRCast()?
 	  bool needConversion = true;
-	  CallExpr *CE = dyn_cast<CallExpr>(NewBase);
+	  CallExpr *CE = dyn_cast<CallExpr>(NewBase->IgnoreParens());
 	  FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
 	  if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
 	    // upcr_shared_to_pshared(pshared_to_shared(p)) -> p
