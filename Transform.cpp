@@ -651,7 +651,7 @@ namespace {
     }
     Expr *FoldUPCRLoadStore(Expr* &E, bool &Phaseless) {
       Expr *Offset = NULL;
-      while (CallExpr *CE = dyn_cast<CallExpr>(E)) {
+      while (CallExpr *CE = dyn_cast<CallExpr>(E->IgnoreParens())) {
         FunctionDecl *FD = CE->getDirectCallee();
         if (FD == Decls->UPCR_SHARED_TO_PSHARED || FD == Decls->UPCR_PSHARED_TO_SHARED) {
           // Fold phased/phaseless conversion into choice of Accessor
@@ -745,7 +745,7 @@ namespace {
 	FunctionDecl *CastFn = 0;
 	ExprResult Result = TransformExpr(E->getSubExpr());
 	Expr *Arg = Result.get();
-	CallExpr *CE = dyn_cast<CallExpr>(Arg);
+	CallExpr *CE = dyn_cast<CallExpr>(Arg->IgnoreParens());
 	FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
 	if(isPhaseless(DstPointee) && !isPhaseless(SrcPointee)) {
 	  CastFn = Decls->UPCR_SHARED_TO_PSHARED;
