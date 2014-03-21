@@ -2043,8 +2043,9 @@ int main(int argc, const char ** argv) {
   // Parse the arguments
   OwningPtr<OptTable> Opts(createDriverOptTable());
   unsigned MissingArgIndex, MissingArgCount;
+  const unsigned IncludedFlagsBitmask = options::CC1Option;
   OwningPtr<InputArgList> Args(
-    Opts->ParseArgs(argv, argv + argc,MissingArgIndex, MissingArgCount));
+    Opts->ParseArgs(argv, argv + argc,MissingArgIndex, MissingArgCount, IncludedFlagsBitmask));
 
   // Read the input and output files and adjust the arguments
   std::string InputFile = Args->getLastArgValue(options::OPT_INPUT);
