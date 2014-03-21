@@ -655,6 +655,9 @@ namespace {
         FunctionDecl *FD = CE->getDirectCallee();
         if (FD == Decls->UPCR_SHARED_TO_PSHARED || FD == Decls->UPCR_PSHARED_TO_SHARED) {
           // Fold phased/phaseless conversion into choice of Accessor
+          // NOTE: Dropping a shared_to_pshared() in this manner is NOT a correct
+          // transform if any definite pointer-to-shared arithmetic were then applied.
+          // It is acceptible here ONLY because Put and Get don't use the phase.
           E = CE->getArg(0);
           Phaseless = !Phaseless;
         } else if ((FD == Decls->UPCR_ADD_PSHARED1 || FD == Decls->UPCR_ADD_SHARED || FD == Decls->UPCR_ADD_PSHAREDI) && isLiteralInt(CE->getArg(2),0)) {
