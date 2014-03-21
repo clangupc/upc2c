@@ -725,6 +725,42 @@ namespace {
       Expr *Load = BuildUPCRCall(Accessor, args).get();
       return std::make_pair(Load, CreateSimpleDeclRef(TmpVar));
     }
+    ExprResult BuildUPCRSharedToPshared(Expr *Ptr) {
+      CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens());
+      FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
+      if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
+	// upcr_shared_to_pshared(pshared_to_shared(p)) -> p
+	return ExprResult(CE->getArg(0));
+      } else if(Child == Decls->UPCR_SHARED_RESETPHASE) {
+	// shared_to_pshared(resetphase(p)) -> shared_to_pshared(p)
+	Ptr = CE->getArg(0);
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      return BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args);
+    }
+    ExprResult BuildUPCRPsharedToShared(Expr *Ptr) {
+      CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens());
+      FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
+      if(Child == Decls->UPCR_SHARED_TO_PSHARED) {
+	// pshared_to_shared(shared_to_pshared(p)) -> resetphase(p)
+	return BuildUPCRSharedResetPhase(CE->getArg(0));
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      return BuildUPCRCall(Decls->UPCR_PSHARED_TO_SHARED, args);
+    }
+    ExprResult BuildUPCRSharedResetPhase(Expr *Ptr) {
+      CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens());
+      FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
+      if(Child == Decls->UPCR_SHARED_RESETPHASE) {
+	// resetphase(resetphase(p)) -> resetphase(p)
+	return ExprResult(Ptr);
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      return BuildUPCRCall(Decls->UPCR_SHARED_RESETPHASE, args);
+    }
     ExprResult MaybeTransformUPCRCast(CastExpr *E) {
       if(E->getCastKind() == CK_UPCSharedToLocal) {
 	bool Phaseless = isPhaseless(E->getSubExpr()->getType()->getAs<PointerType>()->getPointeeType());
@@ -742,39 +778,14 @@ namespace {
 		isPointerToShared(E->getType())) {
 	QualType DstPointee = E->getType()->getAs<PointerType>()->getPointeeType();
 	QualType SrcPointee = E->getSubExpr()->getType()->getAs<PointerType>()->getPointeeType();
-	FunctionDecl *CastFn = 0;
 	ExprResult Result = TransformExpr(E->getSubExpr());
-	Expr *Arg = Result.get();
-	CallExpr *CE = dyn_cast<CallExpr>(Arg);
-	FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
 	if(isPhaseless(DstPointee) && !isPhaseless(SrcPointee)) {
-	  CastFn = Decls->UPCR_SHARED_TO_PSHARED;
-	  if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
-	    // upcr_shared_to_pshared(pshared_to_shared(p)) -> p
-	    return ExprResult(CE->getArg(0));
-	  } else if(Child == Decls->UPCR_SHARED_RESETPHASE) {
-	    // shared_to_pshared(resetphase(p)) -> shared_to_pshared(p)
-	    Arg = CE->getArg(0);
-	  }
+	  return BuildUPCRSharedToPshared(Result.get());
 	} else if(!isPhaseless(DstPointee) && isPhaseless(SrcPointee)) {
-	  CastFn = Decls->UPCR_PSHARED_TO_SHARED;
-	  if(Child == Decls->UPCR_SHARED_TO_PSHARED) {
-	    // pshared_to_shared(shared_to_pshared(p)) -> resetphase(p)
-	    CastFn = Decls->UPCR_SHARED_RESETPHASE;
-	    Arg = CE->getArg(0);
-	  }
+	  return BuildUPCRPsharedToShared(Result.get());
 	} else if(!isPhaseless(DstPointee) && !isPhaseless(SrcPointee) &&
 		  E->getCastKind() == CK_UPCBitCastZeroPhase) {
-	  CastFn = Decls->UPCR_SHARED_RESETPHASE;
-	  if(Child == Decls->UPCR_SHARED_RESETPHASE) {
-	    // resetphase(resetphase(p)) -> resetphase(p)
-	    return Result;
-	  }
-	}
-	if(CastFn) {
-	  std::vector<Expr *> args;
-	  args.push_back(Arg);
-	  return BuildUPCRCall(CastFn, args);
+	  return BuildUPCRSharedResetPhase(Result.get());
 	} else {
 	  return Result;
 	}
@@ -1064,23 +1075,7 @@ namespace {
 	ValueDecl * FD = E->getMemberDecl();
 	Expr *NewBase = TransformExpr(Base).get();
 	if(!isPhaseless(BaseType)) {
-	  // FIXME: factor similar logic in MaybeTransformUPCRCast()?
-	  bool needConversion = true;
-	  CallExpr *CE = dyn_cast<CallExpr>(NewBase->IgnoreParens());
-	  FunctionDecl *Child = CE? CE->getDirectCallee() : 0;
-	  if(Child == Decls->UPCR_PSHARED_TO_SHARED) {
-	    // upcr_shared_to_pshared(pshared_to_shared(p)) -> p
-	    needConversion = false;
-	    NewBase = CE->getArg(0);
-	  } else if(Child == Decls->UPCR_SHARED_RESETPHASE) {
-	    // shared_to_pshared(resetphase(p)) -> shared_to_pshared(p)
-	    NewBase = CE->getArg(0);
-	  }
-	  if(needConversion) {
-	    std::vector<Expr*> args;
-	    args.push_back(NewBase);
-	    NewBase = BuildUPCRCall(Decls->UPCR_SHARED_TO_PSHARED, args).get();
-	  }
+	  NewBase = BuildUPCRSharedToPshared(NewBase).get();
 	}
 	CharUnits Offset = SemaRef.Context.toCharUnitsFromBits(SemaRef.Context.getFieldOffset(FD));
 	std::vector<Expr *> args;
