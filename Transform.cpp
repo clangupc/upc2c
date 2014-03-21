@@ -946,7 +946,7 @@ namespace {
     }
     ExprResult BuildUPCRAddPsharedI(Expr *Ptr, int64_t ElemSz, Expr *Inc) {
       if(isLiteralInt(Inc,0)) return Ptr; // No-op
-      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr)) {
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
 	if(CE->getDirectCallee() == Decls->UPCR_ADD_PSHAREDI) {
 	  // Can fold nested UPCR_ADD_PSHAREDI regardless of whether ElemSz matches
 	  Ptr = CE->getArg(0);
@@ -973,7 +973,7 @@ namespace {
     }
     ExprResult BuildUPCRAddPshared1(Expr *Ptr, int64_t ElemSz, Expr *Inc) {
       if(isLiteralInt(Inc,0)) return Ptr; // No-op
-      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr)) {
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
 	// Can fold any nested UPCR_ADD_PSHARED1 if ElemSz matches:
 	if((CE->getDirectCallee() == Decls->UPCR_ADD_PSHARED1) &&
 	   isLiteralInt(CE->getArg(1),ElemSz)) {
@@ -989,7 +989,7 @@ namespace {
     }
     ExprResult BuildUPCRAddShared(Expr *Ptr, int64_t ElemSz, Expr *Inc, uint32_t BlockSz) {
       if(isLiteralInt(Inc,0)) return Ptr; // No-op
-      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr)) {
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
 	// Can fold any nested UPCR_ADD_SHARED if ElemSz and BlockSz each match:
 	if((CE->getDirectCallee() == Decls->UPCR_ADD_SHARED) &&
 	   isLiteralInt(CE->getArg(1),ElemSz) && isLiteralInt(CE->getArg(3),BlockSz)) {
