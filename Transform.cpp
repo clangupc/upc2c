@@ -466,7 +466,7 @@ namespace {
       {}
       llvm::APInt ArrayDimension;
       bool HasThread;
-      int ElementSize;
+      int64_t ElementSize; // Matches representation of CharUnits
       Expr *E;
     };
     ArrayDimensionT GetArrayDimension(QualType Ty) {
@@ -839,7 +839,7 @@ namespace {
     ExprResult CreateUPCPointerArithmetic(Expr *Ptr, Expr *IntVal, QualType PtrTy) {
       QualType PointeeType = PtrTy->getAs<PointerType>()->getPointeeType();
       ArrayDimensionT Dims = GetArrayDimension(PointeeType);
-      int ElementSize = Dims.ElementSize;
+      int64_t ElementSize = Dims.ElementSize;
       IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
       std::vector<Expr*> args;
       args.push_back(Ptr);
@@ -940,7 +940,7 @@ namespace {
 	  ExprResult Result;
 	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
 	  ArrayDimensionT Dims = GetArrayDimension(PointeeType);
-	  int ElementSize = Dims.ElementSize;
+	  int64_t ElementSize = Dims.ElementSize;
 	  std::vector<Expr*> args;
 	  args.push_back(TransformExpr(LHS).get());
 	  args.push_back(TransformExpr(RHS).get());
@@ -987,7 +987,7 @@ namespace {
 	} else if(LHSIsShared && RHSIsShared && (E->getOpcode() == BO_LT || E->getOpcode() == BO_LE || E->getOpcode() == BO_GT || E->getOpcode() == BO_GE)) {
 	  // Relational Comparison
 	  QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
-	  int ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
+	  int64_t ElementSize = SemaRef.Context.getTypeSizeInChars(PointeeType).getQuantity();
 	  std::vector<Expr*> args;
 	  args.push_back(TransformExpr(LHS).get());
 	  args.push_back(TransformExpr(RHS).get());
@@ -1045,7 +1045,7 @@ namespace {
 	Expr *RHS = E->getIdx();
 	QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
 	ArrayDimensionT Dims = GetArrayDimension(PointeeType);
-	int ElementSize = Dims.ElementSize;
+	int64_t ElementSize = Dims.ElementSize;
 	Expr *IntVal = TransformExpr(RHS).get();
 	IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
 	std::vector<Expr*> args;
@@ -1103,7 +1103,7 @@ namespace {
 	  // we need to calculate this up front.
 	  if(E->getTypeOfArgument().getQualifiers().hasShared()) {
 	    ArrayDimensionT Dims = GetArrayDimension(E->getTypeOfArgument());
-	    int ElementSize = Dims.ElementSize;
+	    int64_t ElementSize = Dims.ElementSize;
 	    Expr *IntVal = CreateInteger(SemaRef.Context.getSizeType(), ElementSize);
 	    return MaybeAdjustForArray(Dims, IntVal, BO_Mul);
 	  }
