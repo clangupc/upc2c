@@ -75,21 +75,26 @@ namespace {
     return QualType();
   }
 
-  // FIXME: surely there is a better way to express this in C++:
-  typedef FunctionDecl **UPCRCommFn;
   typedef enum {
     CFNK_PSHARED = 0,
     CFNK_PSHARED_STRICT,
     CFNK_SHARED,
     CFNK_SHARED_STRICT
   } UPCRCommGroupKind;
-  inline UPCRCommGroupKind getCommKind(bool Phaseless, bool Strict) {
-    return Phaseless? (Strict? CFNK_PSHARED_STRICT : CFNK_PSHARED)
-                    : (Strict? CFNK_SHARED_STRICT  : CFNK_SHARED);
-  }
-  inline FunctionDecl *getCommFunction(UPCRCommFn CommGroup, bool Phaseless, bool Strict) {
-    return CommGroup[getCommKind(Phaseless, Strict)];
-  }
+  struct UPCRCommFn {
+  private:
+    FunctionDecl* Decls[4];
+  public:
+    UPCRCommFn() : Decls() {}
+    FunctionDecl*& operator[](int idx) {
+      return Decls[idx];
+    }
+    FunctionDecl*& operator()(bool Phaseless, bool Strict = false) {
+      return Decls[Phaseless? (Strict? CFNK_PSHARED_STRICT : CFNK_PSHARED)
+                            : (Strict? CFNK_SHARED_STRICT  : CFNK_SHARED)];
+    }
+  };
+
 
   struct UPCRDecls {
     FunctionDecl * upcr_notify;
@@ -128,14 +133,14 @@ namespace {
     FunctionDecl * UPCR_SHARED_RESETPHASE;
     FunctionDecl * UPCR_ADDRFIELD_SHARED;
     FunctionDecl * UPCR_ADDRFIELD_PSHARED;
-    FunctionDecl * UPCR_GET[4];
-    FunctionDecl * UPCR_GET_IVAL[4];
-    FunctionDecl * UPCR_GET_FVAL[4];
-    FunctionDecl * UPCR_GET_DVAL[4];
-    FunctionDecl * UPCR_PUT[4];
-    FunctionDecl * UPCR_PUT_IVAL[4];
-    FunctionDecl * UPCR_PUT_FVAL[4];
-    FunctionDecl * UPCR_PUT_DVAL[4];
+    UPCRCommFn UPCR_GET;
+    UPCRCommFn UPCR_GET_IVAL;
+    UPCRCommFn UPCR_GET_FVAL;
+    UPCRCommFn UPCR_GET_DVAL;
+    UPCRCommFn UPCR_PUT;
+    UPCRCommFn UPCR_PUT_IVAL;
+    UPCRCommFn UPCR_PUT_FVAL;
+    UPCRCommFn UPCR_PUT_DVAL;
     VarDecl * upcrt_forall_control;
     VarDecl * upcr_null_shared;
     VarDecl * upcr_null_pshared;
@@ -766,18 +771,18 @@ namespace {
 	// Case 1.  Get by value, with type cast if necesssary
 	args.push_back(Ptr);
 	args.push_back(Offset);
-	UPCRCommFn Accessor;
+	UPCRCommFn *Accessor;
 	TypeSourceInfo *CastTo = NULL;
 	if(ResultType->isSpecificBuiltinType(BuiltinType::Float)) {
-	  Accessor = Decls->UPCR_GET_FVAL;
+	  Accessor = &Decls->UPCR_GET_FVAL;
 	} else if(ResultType->isSpecificBuiltinType(BuiltinType::Double)) {
-	  Accessor = Decls->UPCR_GET_DVAL;
+	  Accessor = &Decls->UPCR_GET_DVAL;
 	} else {
-	  Accessor = Decls->UPCR_GET_IVAL;
+	  Accessor = &Decls->UPCR_GET_IVAL;
 	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
 	  CastTo = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
 	}
-	Result = BuildUPCRCall(getCommFunction(Accessor,Phaseless,Strict), args).get();
+	Result = BuildUPCRCall((*Accessor)(Phaseless,Strict), args).get();
 	if(CastTo || LoadVar) {
 	  if(CastTo) Result = SemaRef.BuildCStyleCastExpr(SourceLocation(), CastTo, SourceLocation(), Result).get();
 	  if(LoadVar) Result = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LoadVar, Result).get();
@@ -794,7 +799,7 @@ namespace {
 	args.push_back(Ptr);
 	args.push_back(Offset);
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
-	Result = BuildUPCRCall(getCommFunction(Decls->UPCR_GET,Phaseless,Strict), args).get();
+	Result = BuildUPCRCall(Decls->UPCR_GET(Phaseless,Strict), args).get();
 	if(TmpVar) Result = BuildParens(BuildComma(Result, CreateSimpleDeclRef(TmpVar)).get()).get();
       }
       return Result;
@@ -882,7 +887,7 @@ namespace {
       // Try to fold offset and phased/phaseless conversions:
       Expr *Offset = FoldUPCRLoadStore(LHS, Phaseless);
       // Select the default function to call
-      UPCRCommFn Accessor = Decls->UPCR_PUT;
+      UPCRCommFn *Accessor = &Decls->UPCR_PUT;
       Expr *SetTmp = NULL;
       Expr *SrcArg = NULL;
       Expr *RetVal = NULL;
@@ -906,15 +911,15 @@ namespace {
 	  if(ReturnValue) RetVal = CreateSimpleDeclRef(TmpVar);
 	}
 	if(ResultType->isSpecificBuiltinType(BuiltinType::Float)) {
-	  Accessor = Decls->UPCR_PUT_FVAL;
+	  Accessor = &Decls->UPCR_PUT_FVAL;
 	  NeedSize = false;
 	} else if(ResultType->isSpecificBuiltinType(BuiltinType::Double)) {
-	  Accessor = Decls->UPCR_PUT_DVAL;
+	  Accessor = &Decls->UPCR_PUT_DVAL;
 	  NeedSize = false;
 	} else {
 	  TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Decls->upcr_register_value_t);
 	  SrcArg = SemaRef.BuildCStyleCastExpr(SourceLocation(), TSI, SourceLocation(), SrcArg).get();
-	  Accessor = Decls->UPCR_PUT_IVAL;
+	  Accessor = &Decls->UPCR_PUT_IVAL;
 	}
       } else if (RHS->isLValue() && !ReturnValue &&
 		 SemaRef.Context.typesAreCompatible(ResultType, RHSType)) {
@@ -935,7 +940,7 @@ namespace {
       if(NeedSize) {
 	args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
       }
-      ExprResult Result = BuildUPCRCall(getCommFunction(Accessor,Phaseless,Strict), args);
+      ExprResult Result = BuildUPCRCall((*Accessor)(Phaseless,Strict), args);
       if(SetTmp || RetVal) {
 	if(SetTmp) Result = BuildComma(SetTmp, Result.get());
 	if(RetVal) Result = BuildComma(Result.get(), RetVal);
@@ -2065,7 +2070,7 @@ namespace {
 	    args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
 	    args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
 	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
-	    PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT[Phaseless?CFNK_PSHARED:CFNK_SHARED], args).get());
+	    PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT(Phaseless), args).get());
 	  }
 	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
 	}
