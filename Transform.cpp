@@ -726,10 +726,6 @@ namespace {
           // It is acceptible here ONLY because Put and Get don't use the phase.
           E = CE->getArg(0);
           Phaseless = !Phaseless;
-        } else if ((FD == Decls->UPCR_ADD_PSHARED1 || FD == Decls->UPCR_ADD_SHARED || FD == Decls->UPCR_ADD_PSHAREDI) && isLiteralInt(CE->getArg(2),0)) {
-          // Remove 0-increment address arithmetic
-          assert(!CE->getArg(1)->HasSideEffects(SemaRef.Context));
-          E = CE->getArg(0);
         } else if (FD == Decls->UPCR_ADD_PSHAREDI) {
           // Fold (non-zero) indefinite address arithmetic into the Offset
           E = CE->getArg(0);
@@ -948,23 +944,78 @@ namespace {
       }
       return Result;
     }
+    ExprResult BuildUPCRAddPsharedI(Expr *Ptr, int64_t ElemSz, Expr *Inc) {
+      if(isLiteralInt(Inc,0)) return Ptr; // No-op
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
+	if(CE->getDirectCallee() == Decls->UPCR_ADD_PSHAREDI) {
+	  // Can fold nested UPCR_ADD_PSHAREDI regardless of whether ElemSz matches
+	  Ptr = CE->getArg(0);
+	  if(isLiteralInt(CE->getArg(1),ElemSz)) {
+	    // Can fold simply if ElemSz matches:
+	    Inc = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Inc, CE->getArg(2)).get();
+	  } else {
+	    // Can fold other cases with some extra work:
+	    Expr *Op1 = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul,
+						   CreateInteger(SemaRef.Context.getSizeType(),ElemSz),
+						   MaybeAddParensForMultiply(Inc)).get();
+	    Expr *Op2 = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Mul, CE->getArg(1),
+						   MaybeAddParensForMultiply(CE->getArg(2))).get();
+	    Inc = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Op1, Op2).get();
+	    ElemSz = 1;
+	  }
+	}
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElemSz));
+      args.push_back(Inc);
+      return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+    }
+    ExprResult BuildUPCRAddPshared1(Expr *Ptr, int64_t ElemSz, Expr *Inc) {
+      if(isLiteralInt(Inc,0)) return Ptr; // No-op
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
+	// Can fold any nested UPCR_ADD_PSHARED1 if ElemSz matches:
+	if((CE->getDirectCallee() == Decls->UPCR_ADD_PSHARED1) &&
+	   isLiteralInt(CE->getArg(1),ElemSz)) {
+	  Ptr = CE->getArg(0);
+	  Inc = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Inc, CE->getArg(2)).get();
+	}
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElemSz));
+      args.push_back(Inc);
+      return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+    }
+    ExprResult BuildUPCRAddShared(Expr *Ptr, int64_t ElemSz, Expr *Inc, uint32_t BlockSz) {
+      if(isLiteralInt(Inc,0)) return Ptr; // No-op
+      if(CallExpr *CE = dyn_cast<CallExpr>(Ptr->IgnoreParens())) {
+	// Can fold any nested UPCR_ADD_SHARED if ElemSz and BlockSz each match:
+	if((CE->getDirectCallee() == Decls->UPCR_ADD_SHARED) &&
+	   isLiteralInt(CE->getArg(1),ElemSz) && isLiteralInt(CE->getArg(3),BlockSz)) {
+	  Ptr = CE->getArg(0);
+	  Inc = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Add, Inc, CE->getArg(2)).get();
+	}
+      }
+      std::vector<Expr*> args;
+      args.push_back(Ptr);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElemSz));
+      args.push_back(Inc);
+      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), BlockSz));
+      return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+    }
     ExprResult CreateUPCPointerArithmetic(Expr *Ptr, Expr *IntVal, QualType PtrTy) {
       QualType PointeeType = PtrTy->getAs<PointerType>()->getPointeeType();
       ArrayDimensionT Dims = GetArrayDimension(PointeeType);
       int64_t ElementSize = Dims.ElementSize;
       IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
-      std::vector<Expr*> args;
-      args.push_back(Ptr);
-      args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
-      args.push_back(IntVal);
       uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
       if(LayoutQualifier == 0) {
-	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+	return BuildUPCRAddPsharedI(Ptr, ElementSize, IntVal);
       } else if(isPhaseless(PointeeType) && LayoutQualifier == 1) {
-	return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+	return BuildUPCRAddPshared1(Ptr, ElementSize, IntVal);
       } else {
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
-	return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+	return BuildUPCRAddShared(Ptr, ElementSize, IntVal, LayoutQualifier);
       }
     }
     ExprResult CreateArithmeticExpr(Expr *LHS, Expr *RHS, QualType LHSTy, BinaryOperatorKind Op) {
@@ -1158,20 +1209,16 @@ namespace {
 	QualType PointeeType = LHS->getType()->getAs<PointerType>()->getPointeeType();
 	ArrayDimensionT Dims = GetArrayDimension(PointeeType);
 	int64_t ElementSize = Dims.ElementSize;
+	Expr *Ptr = TransformExpr(LHS).get();
 	Expr *IntVal = TransformExpr(RHS).get();
 	IntVal = MaybeAdjustForArray(Dims, IntVal, BO_Mul).get();
-	std::vector<Expr*> args;
-	args.push_back(TransformExpr(LHS).get());
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), ElementSize));
-	args.push_back(IntVal);
 	uint32_t LayoutQualifier = PointeeType.getQualifiers().getLayoutQualifier();
 	if(LayoutQualifier == 0) {
-	  return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+	  return BuildUPCRAddPsharedI(Ptr, ElementSize, IntVal);
 	} else if(LayoutQualifier == 1) {
-	  return BuildUPCRCall(Decls->UPCR_ADD_PSHARED1, args);
+	  return BuildUPCRAddPshared1(Ptr, ElementSize, IntVal);
 	} else {
-	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(), LayoutQualifier));
-	  return BuildUPCRCall(Decls->UPCR_ADD_SHARED, args);
+	  return BuildUPCRAddShared(Ptr, ElementSize, IntVal, LayoutQualifier);
 	}
       } else {
 	return TreeTransformUPC::TransformArraySubscriptExpr(E);
@@ -1190,11 +1237,8 @@ namespace {
 	  NewBase = BuildUPCRSharedToPshared(NewBase).get();
 	}
 	CharUnits Offset = SemaRef.Context.toCharUnitsFromBits(SemaRef.Context.getFieldOffset(FD));
-	std::vector<Expr *> args;
-	args.push_back(NewBase);
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), 1));
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(), Offset.getQuantity()));
-	return BuildUPCRCall(Decls->UPCR_ADD_PSHAREDI, args);
+	Expr *IntVal = CreateInteger(SemaRef.Context.getSizeType(), Offset.getQuantity());
+	return BuildUPCRAddPsharedI(NewBase, 1, IntVal);
       } else {
 	return TreeTransformUPC::TransformMemberExpr(E);
       }
