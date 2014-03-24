@@ -768,7 +768,6 @@ namespace {
 	args.push_back(Ptr);
 	args.push_back(Offset);
 	UPCRCommFn *Accessor;
-	TypeSourceInfo *CastTo = NULL;
 	if(ResultType->isSpecificBuiltinType(BuiltinType::Float)) {
 	  Accessor = &Decls->UPCR_GET_FVAL;
 	} else if(ResultType->isSpecificBuiltinType(BuiltinType::Double)) {
@@ -776,14 +775,15 @@ namespace {
 	} else {
 	  Accessor = &Decls->UPCR_GET_IVAL;
 	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
-	  CastTo = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
 	}
 	Result = BuildUPCRCall((*Accessor)(Phaseless,Strict), args).get();
-	if(CastTo || LoadVar) {
-	  if(CastTo) Result = SemaRef.BuildCStyleCastExpr(SourceLocation(), CastTo, SourceLocation(), Result).get();
-	  if(LoadVar) Result = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LoadVar, Result).get();
-	  Result = BuildParens(Result).get();
+	// NOTE: Without a cast the float and double cases yield an assertion failure!?
+	TypeSourceInfo *CastTo = SemaRef.Context.getTrivialTypeSourceInfo(ResultType);
+	Result = SemaRef.BuildCStyleCastExpr(SourceLocation(), CastTo, SourceLocation(), Result).get();
+	if(LoadVar) {
+	  Result = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LoadVar, Result).get();
 	}
+	Result = BuildParens(Result).get();
       } else {
 	// Case 2.  Get by reference, to callers LoadVar if passed
 	VarDecl *TmpVar = NULL;
