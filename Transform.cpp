@@ -774,7 +774,7 @@ namespace {
 	  Accessor = &Decls->UPCR_GET_DVAL;
 	} else {
 	  Accessor = &Decls->UPCR_GET_IVAL;
-	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
+	  args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
 	}
 	Result = BuildUPCRCall((*Accessor)(Phaseless,Strict), args).get();
 	// NOTE: Without a cast the float and double cases yield an assertion failure!?
@@ -794,7 +794,7 @@ namespace {
 	args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, LoadVar).get());
 	args.push_back(Ptr);
 	args.push_back(Offset);
-	args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(ResultType).getQuantity()));
+	args.push_back(CreateInteger(SemaRef.Context.getSizeType(),SemaRef.Context.getTypeSizeInChars(Ty).getQuantity()));
 	Result = BuildUPCRCall(Decls->UPCR_GET(Phaseless,Strict), args).get();
 	if(TmpVar) Result = BuildParens(BuildComma(Result, CreateSimpleDeclRef(TmpVar)).get()).get();
       }
