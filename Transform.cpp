@@ -1463,11 +1463,26 @@ namespace {
 					      IsStmtExpr);
     }
     StmtResult TransformReturnStmt(ReturnStmt * S) {
-      StmtResult result = TreeTransformUPC::TransformReturnStmt(S);
+      Expr * Result = S->getRetValue();
+      if(Result)
+	Result = TransformExpr(Result).get();
       SmallVector<Stmt*, 2> Statements;
       std::vector<Expr*> args;
+      FunctionDecl * CurFunction = SemaRef.getCurFunctionDecl();
+      QualType ResultType = CurFunction->getResultType();
+      if(ResultType->isVoidType() && Result) {
+	// Just evaluate it
+	Statements.push_back(Result);
+	Result = NULL;
+      }
+      if(!ResultType->isVoidType() && Result) {
+	VarDecl *D = CreateTmpVar(ResultType);
+	Expr *V = CreateSimpleDeclRef(D);
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, V, Result).get());
+	Result = V;
+      }
       Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
-      Statements.push_back(result.get());
+      Statements.push_back(SemaRef.ActOnReturnStmt(S->getReturnLoc(), Result).get());
       return SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
     }
     StmtResult TransformUPCPragmaStmt(UPCPragmaStmt *) {
