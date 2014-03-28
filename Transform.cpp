@@ -1366,6 +1366,22 @@ namespace {
 	return Result;
       }
     }
+    ExprResult TransformConditionalOperator(ConditionalOperator *E) {
+      // The only difference from the default is this TransformCondition vs TransformExpr:
+      ExprResult Cond = TransformCondition(E->getCond());
+      if (Cond.isInvalid())
+	return ExprError();
+
+      ExprResult LHS = TransformExpr(E->getLHS());
+      if (LHS.isInvalid())
+	return ExprError();
+
+      ExprResult RHS = TransformExpr(E->getRHS());
+      if (RHS.isInvalid())
+	return ExprError();
+
+      return getDerived().RebuildConditionalOperator(Cond.get(), E->getQuestionLoc(), LHS.get(), E->getColonLoc(), RHS.get());
+    }
     StmtResult TransformIfStmt(IfStmt *S) {
       // Transform the condition
       ExprResult Cond;
