@@ -2209,7 +2209,10 @@ namespace {
 	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
 	"#endif\n";
 
-      Result->print(OS);
+      PrintingPolicy Policy = newContext.getPrintingPolicy();
+      Policy.IncludeLineDirectives = true;
+      Policy.SM = &newContext.getSourceManager();
+      Result->print(OS, Policy);
     }
     void InitializeSema(Sema& SemaRef) { S = &SemaRef; }
     void ForgetSema() { S = 0; }
