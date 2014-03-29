@@ -1060,24 +1060,23 @@ namespace {
         Expr * Setup = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, TransformExpr(E->getSubExpr()).get()).get()).get();
 	Expr * Access = SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, TmpPtr).get();
 
-	Expr * Saved;
-	Expr * TmpVal;
+	VarDecl * TmpValDecl = CreateTmpVar(TransformType(ArgType).getUnqualifiedType());
+	Expr * TmpVal = CreateSimpleDeclRef(TmpValDecl);
+	Expr * Expr1;
+	Expr * Expr2;
+	// Uses TmpVal such that Access is read exactly once (in case it is volatile)
 	if(E->isPostfix()) {
-	  // Save the old value
-	  VarDecl * TmpValDecl = CreateTmpVar(TransformType(ArgType).getUnqualifiedType());
-	  TmpVal = CreateSimpleDeclRef(TmpValDecl);
-	  Saved = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVal, Access).get();
-	}
-
-	Expr * NewVal = CreateArithmeticExpr(Access, CreateInteger(SemaRef.Context.IntTy, 1),
-					     ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
-	Expr * Operation = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, Access, NewVal).get();
-
-	if(E->isPrefix()) {
-	  return BuildParens(BuildComma(Setup, BuildComma(Operation, Access).get()).get());
+	  Expr1 = Access;
+	  Expr2 = CreateArithmeticExpr(TmpVal, CreateInteger(SemaRef.Context.IntTy, 1),
+					ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
 	} else {
-	  return BuildParens(BuildComma(Setup, BuildComma(Saved, BuildComma(Operation, TmpVal).get()).get()).get());
+	  Expr1 = CreateArithmeticExpr(Access, CreateInteger(SemaRef.Context.IntTy, 1),
+					ArgType, E->isIncrementOp()?BO_Add:BO_Sub).get();
+	  Expr2 = TmpVal;
 	}
+	Expr1 = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpVal, Expr1).get();
+	Expr2 = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, Access, Expr2).get();
+	return BuildParens(BuildComma(Setup, BuildComma(Expr1, BuildComma(Expr2, TmpVal).get()).get()).get());
       } else if(isPointerToShared(ArgType) && E->getOpcode() == UO_LNot) {
 	bool Phaseless = isPhaseless(ArgType->getAs<PointerType>()->getPointeeType());
 	std::vector<Expr*> args;
