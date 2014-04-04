@@ -476,7 +476,8 @@ namespace {
     bool haveVAArg;
   public:
     RemoveUPCTransform(Sema& S, UPCRDecls* D, const std::string& fileid)
-      : TreeTransformUPC(S), AnonRecordID(0), Decls(D), FileString(fileid) {
+      : TreeTransformUPC(S), AnonRecordID(0), StaticLocalVarID(0),
+        Decls(D), FileString(fileid) {
       haveOffsetOf = haveVAArg = false;
     }
     bool HaveOffsetOf() { return haveOffsetOf; }
@@ -511,6 +512,7 @@ namespace {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()).get();
     }
     int AnonRecordID;
+    int StaticLocalVarID;
     IdentifierInfo *getRecordDeclName(IdentifierInfo * OrigName) {
       return OrigName;
     }
@@ -1731,8 +1733,16 @@ namespace {
 	if(VD->getType().getQualifiers().hasShared()) {
 	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
 	  QualType VarType = (isPhaseless(VD->getType())? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t );
+          IdentifierInfo *VarName = VD->getIdentifier();
+          if(VD->isStaticLocal()) {
+            // Need to mangle the name
+            std::string Name = (llvm::Twine("_bupc_static_local") +
+                                llvm::Twine(StaticLocalVarID++) + 
+                                VarName->getName()).str();
+            VarName = &SemaRef.Context.Idents.get(Name);
+          }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(),
-					    VD->getLocation(), VD->getIdentifier(),
+					    VD->getLocation(), VarName,
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
 	  transformedLocalDecl(D, result);
 	  SharedGlobals.push_back(std::make_pair(result, VD));
