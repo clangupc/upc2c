@@ -2175,7 +2175,7 @@ namespace {
 
   class RemoveUPCConsumer : public clang::SemaConsumer {
   public:
-    RemoveUPCConsumer(StringRef Output, StringRef FileString) : filename(Output), fileid(FileString) {}
+    RemoveUPCConsumer(StringRef Output, StringRef FileString, bool Lines) : filename(Output), fileid(FileString), lines(Lines) {}
     virtual void HandleTranslationUnit(clang::ASTContext &Context) {
       if(Context.getDiagnostics().hasUncompilableErrorOccurred())
 	return;
@@ -2220,7 +2220,7 @@ namespace {
 	"#endif\n";
 
       PrintingPolicy Policy = newContext.getPrintingPolicy();
-      Policy.IncludeLineDirectives = true;
+      Policy.IncludeLineDirectives = lines;
       Policy.SM = &newContext.getSourceManager();
       Result->print(OS, Policy);
     }
@@ -2230,16 +2230,18 @@ namespace {
     Sema *S;
     std::string filename;
     std::string fileid;
+    bool lines;
   };
 
   class RemoveUPCAction : public clang::ASTFrontendAction {
   public:
-    RemoveUPCAction(StringRef OutputFile, StringRef FileString) : filename(OutputFile), fileid(FileString) {}
+    RemoveUPCAction(StringRef OutputFile, StringRef FileString, bool Lines) : filename(OutputFile), fileid(FileString), lines(Lines) {}
     virtual clang::ASTConsumer *CreateASTConsumer(clang::CompilerInstance &Compiler, llvm::StringRef InFile) {
-      return new RemoveUPCConsumer(filename, fileid);
+      return new RemoveUPCConsumer(filename, fileid, lines);
     }
     std::string filename;
     std::string fileid;
+    bool lines;
   };
 
 }
@@ -2261,6 +2263,9 @@ int main(int argc, const char ** argv) {
   std::string OutputFile = Args->getLastArgValue(options::OPT_o, DefaultOutputFile);
   Args->eraseArg(options::OPT_o);
 
+  bool Lines = !Args->hasArg(options::OPT_P);
+  Args->eraseArg(options::OPT_P);
+
   // Write the arguments to a vector
   ArgStringList NewOptions;
   for(ArgList::const_iterator iter = Args->begin(), end = Args->end(); iter != end; ++iter) {
@@ -2278,7 +2283,7 @@ int main(int argc, const char ** argv) {
   std::vector<std::string> options(NewOptions.begin(), NewOptions.end());
 
   FileManager * Files(new FileManager(FileSystemOptions()));
-  ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile)), Files);
+  ToolInvocation tool(options, new RemoveUPCAction(OutputFile, get_file_id(InputFile), Lines), Files);
   if(tool.run()) {
     return EXIT_SUCCESS;
   } else {
