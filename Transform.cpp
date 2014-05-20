@@ -1900,6 +1900,8 @@ namespace {
         return Result;
       } else if(isa<EmptyDecl>(D)) {
 	return EmptyDecl::Create(SemaRef.Context, DC, D->getLocation());
+      } else if(PragmaPupcDecl *PD = dyn_cast<PragmaPupcDecl>(D)) {
+        return PragmaPupcDecl::Create(SemaRef.Context, DC, PD->getLocation(), PD->getOn());
       } else {
 	assert(!"Unknown Decl");
       }
