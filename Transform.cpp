@@ -1675,6 +1675,7 @@ namespace {
 				    false, FD->hasWrittenPrototype(),
 				    FD->isConstexpr());
 	transformedLocalDecl(D, result);
+        copyAttrs(D, result);
 	// Copy the parameters
 	SmallVector<ParmVarDecl *, 2> Parms;
 	int i = 0;
@@ -1693,6 +1694,7 @@ namespace {
 						   PTSI,
 						   OldParam->getStorageClass(),
 						   TransformExpr(OldParam->getDefaultArg()).get());
+          copyAttrs(OldParam, Param);
 	  Param->setScopeInfo(0, i++);
 	  Parms.push_back(Param);
 	}
@@ -1745,6 +1747,7 @@ namespace {
 					    VD->getLocation(), VarName,
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
 	  transformedLocalDecl(D, result);
+          copyAttrs(D, result);
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  Qualifiers Quals;
 	  QualType RealType = TransformType(SemaRef.Context.getUnqualifiedArrayType(VD->getType(), Quals));
@@ -1783,6 +1786,7 @@ namespace {
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
 					    VD->getStorageClass());
 	  transformedLocalDecl(D, result);
+          copyAttrs(D, result);
 	  Expr *Init = VD->getInit();
 	  DynamicInitializers.push_back(std::make_pair(result, TransformExpr(Init).get()));
 	  LocalStatics.push_back(result);
@@ -1792,6 +1796,7 @@ namespace {
 					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
 					    VD->getStorageClass());
 	  transformedLocalDecl(D, result);
+          copyAttrs(D, result);
 	  if(Expr *Init = VD->getInit()) {
 	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit(), false);
 	  }
@@ -1803,6 +1808,7 @@ namespace {
 				  RD->getLocStart(), RD->getLocation(),
 				  Name, cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
 	transformedLocalDecl(D, Result);
+        copyAttrs(D, Result);
 	SmallVector<Decl *, 4> Fields;
 	if(RD->isThisDeclarationADefinition()) {
 	  Result->startDefinition();
@@ -1814,6 +1820,7 @@ namespace {
 	      if(DI) DI = TransformType(DI);
 	      FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(), TransformType(FD->getType()), DI, Result, FD->getLocation(), FD->isMutable(), TransformExpr(FD->getBitWidth()).get(), FD->getInClassInitStyle(), FD->getInnerLocStart(), FD->getAccess(), 0);
 	      transformedLocalDecl(FD, NewFD);
+              copyAttrs(FD, NewFD);
 	      NewFD->setImplicit(FD->isImplicit());
 	      NewFD->setAccess(FD->getAccess());
 	      Result->addDecl(NewFD);
@@ -1827,6 +1834,7 @@ namespace {
 	      IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), TransformType(IFD->getType()), Chaining, IFD->getChainingSize());
 	      NewIFD->setImplicit(true);
 	      transformedLocalDecl(IFD, NewIFD);
+              copyAttrs(IFD, NewIFD);
 	      Result->addDecl(NewIFD);
 	    } else {
 	      // Skip tag forward declarations.  
@@ -1851,7 +1859,8 @@ namespace {
 	} else {
 	  Ty = TransformType(TD->getTypeSourceInfo());
 	}
-	return TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), Ty);
+	Decl *Result = TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), Ty);
+        copyAttrs(D, Result);
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
 	EnumDecl * PrevDecl = 0;
 	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
@@ -1862,6 +1871,7 @@ namespace {
 					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
 					    ED->isScopedUsingClassTag(), ED->isFixed());
 	transformedLocalDecl(D, Result);
+        copyAttrs(D, Result);
 
 	if(ED->isThisDeclarationADefinition()) {
 
@@ -1877,6 +1887,7 @@ namespace {
 	    }
 	    EnumConstantDecl *EnumConstant = SemaRef.CheckEnumConstant(Result, PrevEnumConstant, iter->getLocation(), iter->getIdentifier(), Value);
 	    transformedLocalDecl(*iter, EnumConstant);
+            copyAttrs(*iter, EnumConstant);
 
 	    EnumConstant->setAccess(Result->getAccess());
 	    Result->addDecl(EnumConstant);
@@ -1896,6 +1907,7 @@ namespace {
 	} else {
 	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier());
 	}
+        copyAttrs(D, Result);
 	// FIXME: What to do about the statement?
         return Result;
       } else if(isa<EmptyDecl>(D)) {
@@ -1907,6 +1919,12 @@ namespace {
       }
       // Should not get here
       return NULL;
+    }
+    void copyAttrs(Decl * src, Decl *dst) {
+      for(Decl::attr_iterator iter = src->attr_begin(), end = src->attr_end();
+          iter != end; ++iter) {
+        dst->addAttr((*iter)->clone(SemaRef.Context));
+      }
     }
     std::set<StringRef> CollectedIncludes;
     void PrintIncludes(llvm::raw_ostream& OS) {
