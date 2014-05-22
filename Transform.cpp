@@ -1861,6 +1861,7 @@ namespace {
 	}
 	Decl *Result = TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), Ty);
         copyAttrs(D, Result);
+        return Result;
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
 	EnumDecl * PrevDecl = 0;
 	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
