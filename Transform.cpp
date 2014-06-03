@@ -5,6 +5,7 @@
 #include <clang/AST/Stmt.h>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Tooling/CommonOptionsParser.h>
@@ -111,6 +112,7 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * upcr_startup_shalloc;
+    FunctionDecl * UPCR_TLD_ADDR;
     FunctionDecl * UPCR_ADD_SHARED;
     FunctionDecl * UPCR_ADD_PSHAREDI;
     FunctionDecl * UPCR_ADD_PSHARED1;
@@ -341,6 +343,10 @@ namespace {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
 	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
+      // UPCR_TLD_ADDR
+      {
+	UPCR_TLD_ADDR = CreateFunction(Context, "UPCR_TLD_ADDR", Context.VoidPtrTy, NULL, 0, true/*variadic*/);
+      }
       // UPCR_GET_{,P}SHARED{,_STRICT}
       {
 	QualType pargTypes[] = { Context.VoidPtrTy, upcr_pshared_ptr_t, Context.IntTy, Context.IntTy };
@@ -430,9 +436,13 @@ namespace {
       }
 
     }
-    FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs) {
+    FunctionDecl *CreateFunction(ASTContext& Context, StringRef name, QualType RetType, QualType * argTypes, int numArgs, bool Variadic = false) {
       DeclContext *DC = Context.getTranslationUnitDecl();
-      QualType Ty = Context.getFunctionType(RetType, llvm::makeArrayRef(argTypes, numArgs), FunctionProtoType::ExtProtoInfo());
+      FunctionProtoType::ExtProtoInfo Info;
+      if(Variadic) {
+        Info.Variadic = true;
+      }
+      QualType Ty = Context.getFunctionType(RetType, llvm::makeArrayRef(argTypes, numArgs), Info);
       FunctionDecl *Result = FunctionDecl::Create(Context, DC, FakeLocation, FakeLocation, DeclarationName(&Context.Idents.get(name)), Ty, Context.getTrivialTypeSourceInfo(Ty), SC_Extern);
       llvm::SmallVector<ParmVarDecl *, 4> Params;
       for(int i = 0; i < numArgs; ++i) {
@@ -467,6 +477,22 @@ namespace {
   private:
     QualType From;
     QualType To;
+  };
+
+  // This class checks for arrays and other constructs that require a typedef
+  // when used with UPCR_TLD_DEFINE.
+  class CheckForArray : public clang::RecursiveASTVisitor<CheckForArray> {
+  public:
+    CheckForArray() : Found(false) {}
+    bool VisitArrayType(ArrayType *) {
+      Found = true;
+      return false;
+    }
+    bool VisitFunctionType(FunctionType *) {
+      Found = true;
+      return false;
+    }
+    bool Found;
   };
 
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
@@ -1273,6 +1299,22 @@ namespace {
 	return TreeTransformUPC::TransformUnaryExprOrTypeTraitExpr(E);
       }
     }
+    ExprResult TransformDeclRefExpr(DeclRefExpr *E) {
+      ExprResult Result = TreeTransformUPC::TransformDeclRefExpr(E);
+      if(!Result.isInvalid()) {
+        if(DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Result.get())) {
+          if(isUPCThreadLocal(DRE->getDecl())) {
+            QualType Ty = DRE->getDecl()->getType();
+            TypeSourceInfo *PtrTy = SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getPointerType(Ty));
+            std::vector<Expr*> args;
+            args.push_back(Result.get());
+            Expr *Call = BuildUPCRCall(Decls->UPCR_TLD_ADDR, args).get();
+            Result = BuildParens(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, SemaRef.BuildCStyleCastExpr(SourceLocation(), PtrTy, SourceLocation(), Call).get()).get());
+          }
+        }
+      }
+      return Result;
+    }
     StmtResult TransformUPCForAllStmt(UPCForAllStmt *S) {
       // Transform the initialization statement
       StmtResult Init = getDerived().TransformStmt(S->getInit());
@@ -1516,6 +1558,23 @@ namespace {
       LocalTemps.push_back(TmpVar);
       return TmpVar;
     }
+    // Creates a typedef for arrays and other types
+    // that have parts after the identifier.
+    TypeSourceInfo *MakeTLDTypedef(TypeSourceInfo *Ty) {
+      CheckForArray check;
+      check.TraverseType(Ty->getType());
+      if(check.Found) {
+        TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
+        std::string Name = (Twine("_cupc2c_tld") + Twine(AnonRecordID++)).str();
+        TypedefDecl *NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
+                                         SourceLocation(), SourceLocation(),
+                                         &SemaRef.Context.Idents.get(Name),
+                                         Ty);
+        LocalStatics.push_back(NewTypedef);
+        Ty = SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getTypedefType(NewTypedef));
+      }
+      return Ty;
+    }
     // Allow decls to be skipped
     StmtResult TransformDeclStmt(DeclStmt *S) {
       SmallVector<Decl *, 4> Decls;
@@ -1650,6 +1709,53 @@ namespace {
 
       return Result;
     }
+    // Transforms the type of a declaration by adding
+    // typedefs for anonymous structs/unions
+    TypedefDecl *MakeTypedefForAnonRecordImpl(QualType Element) {
+      // If this was declared using an anonymous struct,
+      // then we need to create a typedef, so that we
+      // can refer to it later.
+      if(const TagType *TT = dyn_cast<TagType>(Element.getTypePtr())) {
+        if(!TT->getDecl()->getIdentifier()) {
+	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
+          TypedefDecl *& NewTypedef = ExtraAnonTagDecls[TT->getDecl()];
+          if(NewTypedef == NULL) {
+            std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
+            NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
+                                             SourceLocation(), SourceLocation(),
+                                             &SemaRef.Context.Idents.get(Name),
+                                             SemaRef.Context.getTrivialTypeSourceInfo(Element));
+            LocalStatics.push_back(NewTypedef);
+          }
+
+          return NewTypedef;
+        }
+      }
+      // Not an anonymous struct.
+      return NULL;
+    }
+    QualType MakeTypedefForAnonRecord(QualType RealType) {
+      QualType Element = SemaRef.Context.getBaseElementType(RealType);
+      if(const ElaboratedType * ET = dyn_cast<ElaboratedType>(Element)) {
+        Element = ET->getNamedType();
+      }
+      if(TypedefDecl *NewTypedef = MakeTypedefForAnonRecordImpl(Element)) {
+        SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
+        RealType = Sub.TransformType(RealType);
+      }
+      return RealType;
+    }
+    TypeSourceInfo *MakeTypedefForAnonRecord(TypeSourceInfo *RealType) {
+      QualType Element = SemaRef.Context.getBaseElementType(RealType->getType());
+      if(const ElaboratedType * ET = dyn_cast<ElaboratedType>(Element)) {
+        Element = ET->getNamedType();
+      }
+      if(TypedefDecl *NewTypedef = MakeTypedefForAnonRecordImpl(Element)) {
+        SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
+        RealType = Sub.TransformType(RealType);
+      }
+      return RealType;
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(isa<NamedDecl>(D) && cast<NamedDecl>(D)->getIdentifier() == &SemaRef.Context.Idents.get("__builtin_va_list")) {
 	return SemaRef.Context.getBuiltinVaListDecl();
@@ -1754,29 +1860,7 @@ namespace {
 	  SharedGlobals.push_back(std::make_pair(result, VD));
 	  Qualifiers Quals;
 	  QualType RealType = TransformType(SemaRef.Context.getUnqualifiedArrayType(VD->getType(), Quals));
-	  QualType Element = SemaRef.Context.getBaseElementType(RealType);
-	  if(const ElaboratedType * ET = dyn_cast<ElaboratedType>(Element)) {
-	    Element = ET->getNamedType();
-	  }
-	  // If this was declared using an anonymous struct,
-	  // then we need to create a typedef, so that we
-	  // can refer to it later.
-	  if(const TagType *TT = dyn_cast<TagType>(Element.getTypePtr())) {
-	    if(!TT->getDecl()->getIdentifier()) {
-	      TypedefDecl *& NewTypedef = ExtraAnonTagDecls[TT->getDecl()];
-	      if(NewTypedef == NULL) {
-		std::string Name = (Twine("_bupc_anon_struct") + Twine(AnonRecordID++)).str();
-		NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
-						 SourceLocation(), SourceLocation(),
-						 &SemaRef.Context.Idents.get(Name),
-						 SemaRef.Context.getTrivialTypeSourceInfo(Element));
-		LocalStatics.push_back(NewTypedef);
-	      }
-
-	      SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
-	      RealType = Sub.TransformType(RealType);
-	    }
-	  }
+          RealType = MakeTypedefForAnonRecord(RealType);
 	  if(Expr *Init = VD->getInit()) {
 	    Qualifiers Quals;
 	    SharedInitializers.push_back(std::make_pair(result, std::make_pair(TransformExpr(Init).get(), RealType)));
@@ -1785,9 +1869,22 @@ namespace {
 	  return NULL;
 	} else if(needsDynamicInitializer(VD)) {
 	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
-	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
-					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
+          QualType Ty = TransformType(VD->getType());
+          TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
+          if(shouldUseTLD(VD)) {
+            TyInfo = MakeTypedefForAnonRecord(TyInfo);
+            TyInfo = MakeTLDTypedef(TyInfo);
+            Ty = TyInfo->getType();
+          }
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU,
+                                            VD->getLocStart(),
+                                            VD->getLocation(),
+                                            VD->getIdentifier(), Ty,
+                                            TyInfo,
 					    VD->getStorageClass());
+          if(shouldUseTLD(VD)) {
+            ThreadLocalDecls.insert(result);
+          }
 	  transformedLocalDecl(D, result);
           copyAttrs(D, result);
 	  Expr *Init = VD->getInit();
@@ -1795,9 +1892,22 @@ namespace {
 	  LocalStatics.push_back(result);
 	  return NULL;
 	} else {
-	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC, VD->getLocStart(), VD->getLocation(), VD->getIdentifier(),
-					    TransformType(VD->getType()), TransformType(VD->getTypeSourceInfo()),
+          QualType Ty = TransformType(VD->getType());
+          TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
+          if(shouldUseTLD(VD)) {
+            TyInfo = MakeTypedefForAnonRecord(TyInfo);
+            TyInfo = MakeTLDTypedef(TyInfo);
+            Ty = TyInfo->getType();
+          }
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC,
+                                            VD->getLocStart(),
+                                            VD->getLocation(),
+                                            VD->getIdentifier(),
+					    Ty, TyInfo,
 					    VD->getStorageClass());
+          if(shouldUseTLD(VD)) {
+            ThreadLocalDecls.insert(result);
+          }
 	  transformedLocalDecl(D, result);
           copyAttrs(D, result);
 	  if(Expr *Init = VD->getInit()) {
@@ -2014,6 +2124,16 @@ namespace {
       SemaRef.setCurScope(0);
       return result;
     }
+    bool shouldUseTLD(VarDecl *D) {
+      if(!D->hasGlobalStorage()) return false;
+      SourceManager& SrcManager = SemaRef.Context.getSourceManager();
+      SourceLocation Loc = SrcManager.getExpansionLoc(D->getLocation());
+      return Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc);
+    }
+    bool isUPCThreadLocal(Decl *D) {
+      return ThreadLocalDecls.find(D) != ThreadLocalDecls.end();
+    }
+    std::set<Decl*> ThreadLocalDecls;
     std::map<Decl*, TypedefDecl*> ExtraAnonTagDecls;
     std::vector<Stmt*> SplitDecls;
     std::vector<Decl*> LocalStatics;
@@ -2197,6 +2317,30 @@ namespace {
     }
   };
 
+  class UPCPrintHelper : public clang::PrinterHelper {
+  public:
+    UPCPrintHelper(RemoveUPCTransform &T)
+      : Trans(T) {}
+    virtual bool handledStmt(Stmt *, raw_ostream &) { return false; }
+    virtual bool handledDecl(Decl *D, PrintingPolicy const& Policy,
+                             raw_ostream & OS) {
+      if(VarDecl * VD = dyn_cast<VarDecl>(D)) {
+        if(Trans.isUPCThreadLocal(VD)) {
+          VD->getType().print(OS, Policy);
+          OS << " UPCR_TLD_DEFINE(" << VD->getIdentifier()->getName() << ", "
+             << Trans.getSema().Context.getTypeSizeInChars(VD->getType()).getQuantity() << ", " << Trans.getSema().Context.getTypeAlignInChars(VD->getType()).getQuantity() << ")";
+          if(Expr * Init = VD->getInit()) {
+            OS << " = ";
+            Init->printPretty(OS, this, Policy);
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+    RemoveUPCTransform &Trans;
+  };
+
   class RemoveUPCConsumer : public clang::SemaConsumer {
   public:
     RemoveUPCConsumer(StringRef Output, StringRef FileString, bool Lines) : filename(Output), fileid(FileString), lines(Lines) {}
@@ -2244,8 +2388,10 @@ namespace {
 	"#endif\n";
 
       PrintingPolicy Policy = newContext.getPrintingPolicy();
+      UPCPrintHelper helper(Trans);
       Policy.IncludeLineDirectives = lines;
       Policy.SM = &newContext.getSourceManager();
+      Policy.Helper = &helper;
       Result->print(OS, Policy);
     }
     void InitializeSema(Sema& SemaRef) { S = &SemaRef; }
