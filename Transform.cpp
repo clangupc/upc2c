@@ -501,9 +501,12 @@ namespace {
     ExprResult TransformIntegerLiteral(IntegerLiteral *E) {
       return IntegerLiteral::Create(SemaRef.Context, E->getValue(), E->getType(), E->getLocation());
     }
+    ExprResult BuildUPCRCall(FunctionDecl *FD, std::vector<Expr*>& args, SourceLocation Loc) {
+      ExprResult Fn = SemaRef.BuildDeclRefExpr(FD, FD->getType(), VK_LValue, Loc);
+      return SemaRef.BuildResolvedCallExpr(Fn.get(), FD, Loc, args, Loc);
+    }
     ExprResult BuildUPCRCall(FunctionDecl *FD, std::vector<Expr*>& args) {
-      ExprResult Fn = SemaRef.BuildDeclRefExpr(FD, FD->getType(), VK_LValue, SourceLocation());
-      return SemaRef.BuildResolvedCallExpr(Fn.get(), FD, SourceLocation(), args, SourceLocation());
+      return BuildUPCRCall(FD, args, SourceLocation());
     }
     ExprResult BuildUPCRDeclRef(VarDecl *VD) {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation());
@@ -612,22 +615,22 @@ namespace {
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_notify, args).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_notify, args, S->getLocStart()).get();
       return SemaRef.Owned(result);
     }
     StmtResult TransformUPCWaitStmt(UPCWaitStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_wait, args).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_wait, args, S->getLocStart()).get();
       return SemaRef.Owned(result);
     }
     StmtResult TransformUPCBarrierStmt(UPCBarrierStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args, S->getLocStart()).get();
       return SemaRef.Owned(result);
     }
     StmtResult TransformUPCFenceStmt(UPCFenceStmt *S) {
       std::vector<Expr*> args;
-      Stmt *result = BuildUPCRCall(Decls->upcr_poll, args).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_poll, args, S->getLocStart()).get();
       return SemaRef.Owned(result);
     }
     ExprResult TransformUPCThreadExpr(UPCThreadExpr *E) {
