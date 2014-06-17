@@ -1501,7 +1501,7 @@ namespace {
 	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, V, Result).get());
 	Result = V;
       }
-      Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
+      Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, S->getReturnLoc()).get());
       Statements.push_back(SemaRef.ActOnReturnStmt(S->getReturnLoc(), Result).get());
       return SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
     }
@@ -1713,7 +1713,7 @@ namespace {
 	    llvm::SmallVector<Stmt*, 8> Body;
 	    {
 	      std::vector<Expr*> args;
-	      Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args, UserBody->getLocStart()).get());
 	    }
 	    // Insert all the temporary variables that we created
 	    for(std::vector<VarDecl*>::const_iterator iter = LocalTemps.begin(), end = LocalTemps.end(); iter != end; ++iter) {
@@ -1725,7 +1725,7 @@ namespace {
 	    Body.push_back(UserBody);
 	    {
 	      std::vector<Expr*> args;
-	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args).get());
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getLocEnd()).get());
 	    }
 	    if(isMain)
 	      Body.push_back(SemaRef.ActOnReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
