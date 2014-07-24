@@ -1894,12 +1894,14 @@ namespace {
 	} else {
           QualType Ty = TransformType(VD->getType());
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
+          DeclContext *NewDC = DC;
           if(shouldUseTLD(VD)) {
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
             TyInfo = MakeTLDTypedef(TyInfo);
             Ty = TyInfo->getType();
+            NewDC = SemaRef.Context.getTranslationUnitDecl();
           }
-	  VarDecl *result = VarDecl::Create(SemaRef.Context, DC,
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
                                             VD->getLocStart(),
                                             VD->getLocation(),
                                             VD->getIdentifier(),
@@ -1913,7 +1915,11 @@ namespace {
 	  if(Expr *Init = VD->getInit()) {
 	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit(), false);
 	  }
-	  return result;
+          if(shouldUseTLD(VD)) {
+            LocalStatics.push_back(result);
+          } else {
+            return result;
+          }
 	}
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
 	IdentifierInfo *Name = getRecordDeclName(RD->getIdentifier());
