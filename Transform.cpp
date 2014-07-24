@@ -495,6 +495,30 @@ namespace {
     bool Found;
   };
 
+  // The following expressions require dynamic initialization:
+  // &global (If global is shared, then the address is set
+  // dynamically, if it's local, then the address is thread
+  // specific.
+  class CheckForDynamicInitializer : public clang::RecursiveASTVisitor<CheckForDynamicInitializer> {
+  public:
+    CheckForDynamicInitializer() : Found(false) {}
+    bool VisitDeclRefExpr(DeclRefExpr *E) {
+      if(isa<VarDecl>(E->getDecl())) {
+        Found = true;
+        return false;
+      }
+      return true;
+    }
+    bool VisitExpr(Expr *E) {
+      if(E->getType()->hasPointerToSharedRepresentation()) {
+        Found = true;
+        return false;
+      }
+      return true;
+    }
+    bool Found;
+  };
+
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
     typedef TreeTransform<RemoveUPCTransform> TreeTransformUPC;
   private:
@@ -2255,8 +2279,10 @@ namespace {
     }
 
     bool needsDynamicInitializer(VarDecl *VD) {
-      if(isPointerToShared(VD->getType()) && VD->hasGlobalStorage() && VD->hasInit()) {
-	return true;
+      if(VD->hasGlobalStorage() && VD->hasInit()) {
+        CheckForDynamicInitializer Check;
+        Check.TraverseStmt(VD->getInit());
+	return Check.Found;
       } else {
 	return false;
       }
