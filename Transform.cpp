@@ -1559,21 +1559,23 @@ namespace {
       return TmpVar;
     }
     // Creates a typedef for arrays and other types
-    // that have parts after the identifier.
-    TypeSourceInfo *MakeTLDTypedef(TypeSourceInfo *Ty) {
+    // that have parts after the identifier.  Modify
+    // the types in place.
+    void MakeTLDTypedef(QualType &Ty, TypeSourceInfo *&TyInfo) {
       CheckForArray check;
-      check.TraverseType(Ty->getType());
+      check.TraverseType(Ty);
       if(check.Found) {
+        TypeSourceInfo *TSI = SemaRef.Context.getTrivialTypeSourceInfo(Ty);
         TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
         std::string Name = (Twine("_cupc2c_tld") + Twine(AnonRecordID++)).str();
         TypedefDecl *NewTypedef = TypedefDecl::Create(SemaRef.Context, TU,
                                          SourceLocation(), SourceLocation(),
                                          &SemaRef.Context.Idents.get(Name),
-                                         Ty);
+                                         TSI);
         LocalStatics.push_back(NewTypedef);
-        Ty = SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getTypedefType(NewTypedef));
+        Ty = SemaRef.Context.getTypedefType(NewTypedef);
+        TyInfo = SemaRef.Context.getTrivialTypeSourceInfo(Ty);
       }
-      return Ty;
     }
     // Allow decls to be skipped
     StmtResult TransformDeclStmt(DeclStmt *S) {
@@ -1873,8 +1875,7 @@ namespace {
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           if(shouldUseTLD(VD)) {
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
-            TyInfo = MakeTLDTypedef(TyInfo);
-            Ty = TyInfo->getType();
+            MakeTLDTypedef(Ty, TyInfo);
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU,
                                             VD->getLocStart(),
@@ -1897,8 +1898,7 @@ namespace {
           DeclContext *NewDC = DC;
           if(shouldUseTLD(VD)) {
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
-            TyInfo = MakeTLDTypedef(TyInfo);
-            Ty = TyInfo->getType();
+            MakeTLDTypedef(Ty, TyInfo);
             NewDC = SemaRef.Context.getTranslationUnitDecl();
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
