@@ -1874,6 +1874,7 @@ namespace {
           QualType Ty = TransformType(VD->getType());
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           if(shouldUseTLD(VD)) {
+            Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
             MakeTLDTypedef(Ty, TyInfo);
           }
@@ -1897,6 +1898,7 @@ namespace {
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           DeclContext *NewDC = DC;
           if(shouldUseTLD(VD)) {
+            Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
             MakeTLDTypedef(Ty, TyInfo);
             NewDC = SemaRef.Context.getTranslationUnitDecl();
