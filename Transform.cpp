@@ -1408,18 +1408,18 @@ namespace {
 						 Init.get(), FullCond, ConditionVar,
 						 FullInc, S->getRParenLoc(), UPCBody.get());
 
-      ExprResult ForAllCtrl = BuildUPCRDeclRef(Decls->upcrt_forall_control);
+      Expr * ForAllCtrl = CreateSimpleDeclRef(Decls->upcrt_forall_control);
       { // TODO: make this conditional on TLD enabled
-        ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl.get()));
+        ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl)).get();
       }
 
       StmtResult UPCForWrapper;
       {
 	Sema::CompoundScopeRAII BodyScope(SemaRef);
 	SmallVector<Stmt*, 8> Statements;
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl.get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl, CreateInteger(SemaRef.Context.IntTy, 1)).get());
 	Statements.push_back(UPCFor.get());
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl.get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl, CreateInteger(SemaRef.Context.IntTy, 0)).get());
 
 	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
@@ -1430,7 +1430,7 @@ namespace {
 	PlainForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PlainFor.get(), false);
       }
 
-      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ForAllCtrl.get()), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
+      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ForAllCtrl), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
     }
     ExprResult TransformCondition(Expr *E) {
       ExprResult Result = TransformExpr(E);
