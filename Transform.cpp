@@ -2346,8 +2346,11 @@ namespace {
 	}
 	{
 	  for(std::size_t i = 0; i < DynamicInitializers.size(); ++i) {
-	    Expr *LHS = CreateSimpleDeclRef(DynamicInitializers[i].first);
+	    VarDecl * VD = DynamicInitializers[i].first;
+	    Expr *LHS = CreateSimpleDeclRef(VD);
 	    Expr *RHS = DynamicInitializers[i].second;
+	    if(shouldUseTLD(VD))
+	      LHS = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(LHS)).get();
 	    Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LHS, RHS).get());
 	  }
 	}
