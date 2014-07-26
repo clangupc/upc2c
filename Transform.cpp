@@ -1323,17 +1323,20 @@ namespace {
 	return TreeTransformUPC::TransformUnaryExprOrTypeTraitExpr(E);
       }
     }
+    ExprResult BuildTLDRefExpr(DeclRefExpr *DRE) {
+      QualType Ty = DRE->getDecl()->getType();
+      TypeSourceInfo *PtrTy = SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getPointerType(Ty));
+      std::vector<Expr*> args;
+      args.push_back(DRE);
+      Expr *Call = BuildUPCRCall(Decls->UPCR_TLD_ADDR, args).get();
+      return BuildParens(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, SemaRef.BuildCStyleCastExpr(SourceLocation(), PtrTy, SourceLocation(), Call).get()).get());
+    }
     ExprResult TransformDeclRefExpr(DeclRefExpr *E) {
       ExprResult Result = TreeTransformUPC::TransformDeclRefExpr(E);
       if(!Result.isInvalid()) {
         if(DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Result.get())) {
           if(isUPCThreadLocal(DRE->getDecl())) {
-            QualType Ty = DRE->getDecl()->getType();
-            TypeSourceInfo *PtrTy = SemaRef.Context.getTrivialTypeSourceInfo(SemaRef.Context.getPointerType(Ty));
-            std::vector<Expr*> args;
-            args.push_back(Result.get());
-            Expr *Call = BuildUPCRCall(Decls->UPCR_TLD_ADDR, args).get();
-            Result = BuildParens(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_Deref, SemaRef.BuildCStyleCastExpr(SourceLocation(), PtrTy, SourceLocation(), Call).get()).get());
+            Result = BuildTLDRefExpr(DRE);
           }
         }
       }
@@ -1405,13 +1408,18 @@ namespace {
 						 Init.get(), FullCond, ConditionVar,
 						 FullInc, S->getRParenLoc(), UPCBody.get());
 
+      ExprResult ForAllCtrl = BuildUPCRDeclRef(Decls->upcrt_forall_control);
+      { // TODO: make this conditional on TLD enabled
+        ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl.get()));
+      }
+
       StmtResult UPCForWrapper;
       {
 	Sema::CompoundScopeRAII BodyScope(SemaRef);
 	SmallVector<Stmt*, 8> Statements;
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcrt_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl.get(), CreateInteger(SemaRef.Context.IntTy, 1)).get());
 	Statements.push_back(UPCFor.get());
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, BuildUPCRDeclRef(Decls->upcrt_forall_control).get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl.get(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
 
 	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
@@ -1422,7 +1430,7 @@ namespace {
 	PlainForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PlainFor.get(), false);
       }
 
-      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(BuildUPCRDeclRef(Decls->upcrt_forall_control).get()), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
+      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ForAllCtrl.get()), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
     }
     ExprResult TransformCondition(Expr *E) {
       ExprResult Result = TransformExpr(E);
