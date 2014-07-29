@@ -1336,7 +1336,8 @@ namespace {
       if(!Result.isInvalid()) {
         if(DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Result.get())) {
           if(isUPCThreadLocal(DRE->getDecl())) {
-            Result = BuildTLDRefExpr(DRE);
+            if (SemaRef.Context.getLangOpts().UPCTLDEnable)
+              Result = BuildTLDRefExpr(DRE);
           }
         }
       }
@@ -1409,8 +1410,9 @@ namespace {
 						 FullInc, S->getRParenLoc(), UPCBody.get());
 
       Expr * ForAllCtrl = CreateSimpleDeclRef(Decls->upcrt_forall_control);
-      { // TODO: make this conditional on TLD enabled
-        ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl)).get();
+      {
+        if (SemaRef.Context.getLangOpts().UPCTLDEnable)
+          ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl)).get();
       }
 
       StmtResult UPCForWrapper;
@@ -2165,13 +2167,18 @@ namespace {
       return result;
     }
     bool shouldUseTLD(VarDecl *D) {
+      if (!SemaRef.Context.getLangOpts().UPCTLDEnable) return false;
       if(!D->hasGlobalStorage()) return false;
       SourceManager& SrcManager = SemaRef.Context.getSourceManager();
       SourceLocation Loc = SrcManager.getExpansionLoc(D->getLocation());
       return Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc);
     }
     bool isUPCThreadLocal(Decl *D) {
-      return ThreadLocalDecls.find(D) != ThreadLocalDecls.end();
+      LangOptions LangOpts = SemaRef.Context.getLangOpts();
+      if (LangOpts.UPCTLDEnable)
+        return ThreadLocalDecls.find(D) != ThreadLocalDecls.end();
+      else
+        return false;
     }
     std::set<Decl*> ThreadLocalDecls;
     std::map<Decl*, TypedefDecl*> ExtraAnonTagDecls;
@@ -2425,8 +2432,13 @@ namespace {
 	  "#define __builtin_offsetof(_a1,_a2) offsetof(_a1,_a2)\n"
 	  "#endif\n";
       }
+      if (LangOpts.UPCTLDEnable)
+        OS <<
+	  "int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n";
+      else
+        OS <<
+	  "int32_t upcrt_forall_control;\n";
       OS <<
-	"int32_t UPCR_TLD_DEFINE_TENTATIVE(upcrt_forall_control, 4, 4);\n"
 	"#define UPCRT_STARTUP_SHALLOC(sptr, blockbytes, numblocks, mult_by_threads, elemsz, typestr) \\\n"
 	"      { &(sptr), (blockbytes), (numblocks), (mult_by_threads), (elemsz), #sptr, (typestr) }\n"
 	"#define UPCRT_STARTUP_PSHALLOC UPCRT_STARTUP_SHALLOC\n"
