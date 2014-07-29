@@ -1336,8 +1336,7 @@ namespace {
       if(!Result.isInvalid()) {
         if(DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(Result.get())) {
           if(isUPCThreadLocal(DRE->getDecl())) {
-            if (SemaRef.Context.getLangOpts().UPCTLDEnable)
-              Result = BuildTLDRefExpr(DRE);
+            Result = BuildTLDRefExpr(DRE);
           }
         }
       }
@@ -2174,11 +2173,7 @@ namespace {
       return Loc.isInvalid() || !SrcManager.isInSystemHeader(Loc);
     }
     bool isUPCThreadLocal(Decl *D) {
-      LangOptions LangOpts = SemaRef.Context.getLangOpts();
-      if (LangOpts.UPCTLDEnable)
-        return ThreadLocalDecls.find(D) != ThreadLocalDecls.end();
-      else
-        return false;
+      return ThreadLocalDecls.find(D) != ThreadLocalDecls.end();
     }
     std::set<Decl*> ThreadLocalDecls;
     std::map<Decl*, TypedefDecl*> ExtraAnonTagDecls;
