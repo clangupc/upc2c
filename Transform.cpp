@@ -2372,7 +2372,7 @@ namespace {
     virtual bool handledDecl(Decl *D, PrintingPolicy const& Policy,
                              raw_ostream & OS) {
       if(VarDecl * VD = dyn_cast<VarDecl>(D)) {
-        if(Trans.isUPCThreadLocal(VD)) {
+        if(Trans.isUPCThreadLocal(VD) && !VD->hasExternalStorage()) {
           VD->getType().print(OS, Policy);
           OS << " UPCR_TLD_DEFINE(" << VD->getIdentifier()->getName() << ", "
              << Trans.getSema().Context.getTypeSizeInChars(VD->getType()).getQuantity() << ", " << Trans.getSema().Context.getTypeAlignInChars(VD->getType()).getQuantity() << ")";
