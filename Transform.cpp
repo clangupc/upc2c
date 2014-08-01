@@ -1791,6 +1791,12 @@ namespace {
       }
       return RealType;
     }
+    IdentifierInfo * mangleStaticLocalName(IdentifierInfo * VarName) {
+      std::string Name = (llvm::Twine("_bupc_static_local") +
+                          llvm::Twine(StaticLocalVarID++) + 
+                          VarName->getName()).str();
+      return &SemaRef.Context.Idents.get(Name);
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(isa<NamedDecl>(D) && cast<NamedDecl>(D)->getIdentifier() == &SemaRef.Context.Idents.get("__builtin_va_list")) {
 	return SemaRef.Context.getBuiltinVaListDecl();
@@ -1881,11 +1887,7 @@ namespace {
 	  QualType VarType = (isPhaseless(VD->getType())? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t );
           IdentifierInfo *VarName = VD->getIdentifier();
           if(VD->isStaticLocal()) {
-            // Need to mangle the name
-            std::string Name = (llvm::Twine("_bupc_static_local") +
-                                llvm::Twine(StaticLocalVarID++) + 
-                                VarName->getName()).str();
-            VarName = &SemaRef.Context.Idents.get(Name);
+            VarName = mangleStaticLocalName(VarName);
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(),
 					    VD->getLocation(), VarName,
@@ -1906,15 +1908,19 @@ namespace {
 	  TranslationUnitDecl *TU = SemaRef.Context.getTranslationUnitDecl();
           QualType Ty = TransformType(VD->getType());
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
+          IdentifierInfo *VarName = VD->getIdentifier();
           if(shouldUseTLD(VD)) {
             Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
             MakeTLDTypedef(Ty, TyInfo);
           }
+          if(VD->isStaticLocal()) {
+            VarName = mangleStaticLocalName(VarName);
+          }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU,
                                             VD->getLocStart(),
                                             VD->getLocation(),
-                                            VD->getIdentifier(), Ty,
+                                            VarName, Ty,
                                             TyInfo,
 					    VD->getStorageClass());
           if(shouldUseTLD(VD)) {
@@ -1930,16 +1936,20 @@ namespace {
           QualType Ty = TransformType(VD->getType());
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           DeclContext *NewDC = DC;
+          IdentifierInfo *VarName = VD->getIdentifier();
           if(shouldUseTLD(VD)) {
             Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
             MakeTLDTypedef(Ty, TyInfo);
             NewDC = SemaRef.Context.getTranslationUnitDecl();
+            if(VD->isStaticLocal()) {
+              VarName = mangleStaticLocalName(VarName);
+            }
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
                                             VD->getLocStart(),
                                             VD->getLocation(),
-                                            VD->getIdentifier(),
+                                            VarName,
 					    Ty, TyInfo,
 					    VD->getStorageClass());
           if(shouldUseTLD(VD)) {
