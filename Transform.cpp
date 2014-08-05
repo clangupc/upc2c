@@ -519,6 +519,24 @@ namespace {
     bool Found;
   };
 
+  // Determines whether a typedef can safely be moved to
+  // the global scope.  Variable arrays cannot be, since
+  // they depend on local variables.
+  class CheckForLocalType : public clang::RecursiveASTVisitor<CheckForLocalType> {
+  public:
+    CheckForLocalType() : Found(false) {}
+    bool VisitVariableArrayType(VariableArrayType *) {
+      Found = true;
+      return false;
+    }
+    bool VisitUPCThreadArrayType(UPCThreadArrayType *) {
+      Found = true;
+      return false;
+    }
+
+    bool Found;
+  };
+
   class RemoveUPCTransform : public clang::TreeTransform<RemoveUPCTransform> {
     typedef TreeTransform<RemoveUPCTransform> TreeTransformUPC;
   private:
@@ -1797,6 +1815,12 @@ namespace {
                           VarName->getName()).str();
       return &SemaRef.Context.Idents.get(Name);
     }
+    IdentifierInfo * mangleLocalRecordName(IdentifierInfo * VarName) {
+      std::string Name = (llvm::Twine("_bupc_local_decl") +
+                          llvm::Twine(StaticLocalVarID++) + 
+                          VarName->getName()).str();
+      return &SemaRef.Context.Idents.get(Name);
+    }
     Decl *TransformDeclarationImpl(Decl *D, DeclContext *DC) {
       if(isa<NamedDecl>(D) && cast<NamedDecl>(D)->getIdentifier() == &SemaRef.Context.Idents.get("__builtin_va_list")) {
 	return SemaRef.Context.getBuiltinVaListDecl();
@@ -1909,9 +1933,11 @@ namespace {
           QualType Ty = TransformType(VD->getType());
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           IdentifierInfo *VarName = VD->getIdentifier();
-          if(shouldUseTLD(VD)) {
+          if(isa<FunctionDecl>(VD->getDeclContext()) || shouldUseTLD(VD)) {
             Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
+          }
+          if(shouldUseTLD(VD)) {
             MakeTLDTypedef(Ty, TyInfo);
           }
           if(VD->isStaticLocal()) {
@@ -1937,9 +1963,11 @@ namespace {
           TypeSourceInfo *TyInfo = TransformType(VD->getTypeSourceInfo());
           DeclContext *NewDC = DC;
           IdentifierInfo *VarName = VD->getIdentifier();
-          if(shouldUseTLD(VD)) {
+          if(isa<FunctionDecl>(VD->getDeclContext()) || shouldUseTLD(VD)) {
             Ty = MakeTypedefForAnonRecord(Ty);
             TyInfo = MakeTypedefForAnonRecord(TyInfo);
+          }
+          if(shouldUseTLD(VD)) {
             MakeTLDTypedef(Ty, TyInfo);
             NewDC = SemaRef.Context.getTranslationUnitDecl();
             if(VD->isStaticLocal()) {
@@ -1968,6 +1996,10 @@ namespace {
 	}
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
 	IdentifierInfo *Name = getRecordDeclName(RD->getIdentifier());
+        // Mangle struct names that get promoted to the global scope
+        if(Name && isa<FunctionDecl>(RD->getDeclContext())) {
+          Name = mangleLocalRecordName(Name);
+        }
 	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
 				  RD->getLocStart(), RD->getLocation(),
 				  Name, cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
@@ -2015,7 +2047,13 @@ namespace {
 	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
 	  SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getRBraceLoc());
 	}
-	return Result;
+        if(isa<FunctionDecl>(RD->getDeclContext())) {
+          // Promote local struct declarations to the global scope
+          LocalStatics.push_back(Result);
+          return NULL;
+        } else {
+          return Result;
+        }
       } else if(TypedefDecl *TD = dyn_cast<TypedefDecl>(D)) {
 	TypeSourceInfo *Ty;
 	if(TD->getUnderlyingType().getQualifiers().hasShared()) {
@@ -2023,9 +2061,23 @@ namespace {
 	} else {
 	  Ty = TransformType(TD->getTypeSourceInfo());
 	}
-	Decl *Result = TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), TD->getIdentifier(), Ty);
+        IdentifierInfo *Name = TD->getIdentifier();
+        if(isa<FunctionDecl>(TD->getDeclContext())) {
+          Name = mangleLocalRecordName(Name);
+        }
+	Decl *Result = TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), Name, Ty);
         copyAttrs(D, Result);
-        return Result;
+        transformedLocalDecl(TD, Result);
+        CheckForLocalType Checker;
+        Checker.TraverseType(TD->getUnderlyingType().getCanonicalType());
+        if(!Checker.Found) {
+          // Typedefs are always promoted to the global scope
+          // when it's safe to do so.
+          LocalStatics.push_back(Result);
+          return NULL;
+        } else {
+          return Result;
+        }
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
 	EnumDecl * PrevDecl = 0;
 	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
