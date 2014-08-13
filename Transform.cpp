@@ -2070,7 +2070,7 @@ namespace {
         transformedLocalDecl(TD, Result);
         CheckForLocalType Checker;
         Checker.TraverseType(TD->getUnderlyingType().getCanonicalType());
-        if(!Checker.Found) {
+        if(!Checker.Found && isa<FunctionDecl>(TD->getDeclContext())) {
           // Typedefs are always promoted to the global scope
           // when it's safe to do so.
           LocalStatics.push_back(Result);
