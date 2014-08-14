@@ -1973,6 +1973,7 @@ namespace {
             if(VD->isStaticLocal()) {
               VarName = mangleStaticLocalName(VarName);
             }
+            NewDC = SemaRef.Context.getTranslationUnitDecl();
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
                                             VD->getLocStart(),
@@ -1996,11 +1997,15 @@ namespace {
 	}
       } else if(RecordDecl *RD = dyn_cast<RecordDecl>(D)) {
 	IdentifierInfo *Name = getRecordDeclName(RD->getIdentifier());
+        DeclContext *NewDC = DC;
         // Mangle struct names that get promoted to the global scope
         if(Name && isa<FunctionDecl>(RD->getDeclContext())) {
           Name = mangleLocalRecordName(Name);
         }
-	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), DC,
+        if(isa<FunctionDecl>(RD->getDeclContext())) {
+          NewDC = SemaRef.Context.getTranslationUnitDecl();
+        }
+	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), NewDC,
 				  RD->getLocStart(), RD->getLocation(),
 				  Name, cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
 	transformedLocalDecl(D, Result);
@@ -2062,14 +2067,16 @@ namespace {
 	  Ty = TransformType(TD->getTypeSourceInfo());
 	}
         IdentifierInfo *Name = TD->getIdentifier();
-        if(isa<FunctionDecl>(TD->getDeclContext())) {
-          Name = mangleLocalRecordName(Name);
-        }
-	Decl *Result = TypedefDecl::Create(SemaRef.Context, DC, TD->getLocStart(), TD->getLocation(), Name, Ty);
-        copyAttrs(D, Result);
-        transformedLocalDecl(TD, Result);
+        DeclContext *NewDC = DC;
         CheckForLocalType Checker;
         Checker.TraverseType(TD->getUnderlyingType().getCanonicalType());
+        if(!Checker.Found && isa<FunctionDecl>(TD->getDeclContext())) {
+          Name = mangleLocalRecordName(Name);
+          NewDC = SemaRef.Context.getTranslationUnitDecl();
+        }
+	Decl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getLocStart(), TD->getLocation(), Name, Ty);
+        copyAttrs(D, Result);
+        transformedLocalDecl(TD, Result);
         if(!Checker.Found && isa<FunctionDecl>(TD->getDeclContext())) {
           // Typedefs are always promoted to the global scope
           // when it's safe to do so.
