@@ -2014,6 +2014,7 @@ namespace {
 	if(RD->isThisDeclarationADefinition()) {
 	  Result->startDefinition();
           Scope CurScope(SemaRef.getCurScope(), Scope::ClassScope|Scope::DeclScope, SemaRef.getDiagnostics());
+          clang::Sema::ContextRAII SaveCtx(SemaRef, NewDC);
 	  SemaRef.ActOnTagStartDefinition(&CurScope, Result);
 	  for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
 	    if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
