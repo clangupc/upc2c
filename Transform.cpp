@@ -466,12 +466,11 @@ namespace {
     typedef TreeTransform<SubstituteType> TreeTransformS;
   public:
     SubstituteType(Sema &S, QualType F, QualType T) : TreeTransformS(S), From(F), To(T) {}
-    TypeSourceInfo * TransformType(TypeSourceInfo *TI) {
-      if(SemaRef.Context.hasSameType(TI->getType(), From)) {
-	return SemaRef.Context.getTrivialTypeSourceInfo(To);
-      } else {
-	return TreeTransformS::TransformType(TI);
+    QualType TransformType(TypeLocBuilder& TLB, TypeLoc Ty) {
+      if(SemaRef.Context.hasSameType(Ty.getType(), From)) {
+	Ty = SemaRef.Context.getTrivialTypeSourceInfo(To)->getTypeLoc();
       }
+      return TreeTransformS::TransformType(TLB, Ty);
     }
     using TreeTransformS::TransformType;
   private:
