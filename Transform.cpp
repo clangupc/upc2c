@@ -111,6 +111,8 @@ namespace {
     FunctionDecl * UPCRT_STARTUP_SHALLOC;
     FunctionDecl * upcr_startup_pshalloc;
     FunctionDecl * upcr_startup_shalloc;
+    FunctionDecl * upcr_startup_initparray;
+    FunctionDecl * upcr_startup_initarray;
     FunctionDecl * UPCR_ADD_SHARED;
     FunctionDecl * UPCR_ADD_PSHAREDI;
     FunctionDecl * UPCR_ADD_PSHARED1;
@@ -148,6 +150,8 @@ namespace {
     QualType upcr_pshared_ptr_t;
     QualType upcr_startup_shalloc_t;
     QualType upcr_startup_pshalloc_t;
+    QualType upcr_startup_val_t;
+    QualType upcr_startup_diminfo_t;
     QualType upcr_register_value_t;
     SourceLocation FakeLocation;
     explicit UPCRDecls(ASTContext& Context) {
@@ -162,6 +166,8 @@ namespace {
       upcr_pshared_ptr_t = CreateTypedefType(Context, "upcr_pshared_ptr_t", SharedPtrTy);
       upcr_startup_shalloc_t = CreateTypedefType(Context, "upcr_startup_shalloc_t");
       upcr_startup_pshalloc_t = CreateTypedefType(Context, "upcr_startup_pshalloc_t");
+      upcr_startup_val_t = CreateTypedefType(Context, "upcr_startup_val_t");
+      upcr_startup_diminfo_t = CreateTypedefType(Context, "upcr_startup_arrayinit_diminfo_t");
 
       // FIXME: This is a fair assumption, but should really get true type
       upcr_register_value_t = CreateTypedefType(Context, "upcr_register_value_t", Context.getUIntPtrType());
@@ -340,6 +346,16 @@ namespace {
       {
 	QualType argTypes[] = { Context.getPointerType(upcr_startup_shalloc_t), Context.IntTy };
 	upcr_startup_shalloc = CreateFunction(Context, "upcr_startup_shalloc", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_startup_initparray
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.getPointerType(upcr_startup_val_t), Context.getPointerType(upcr_startup_diminfo_t), Context.IntTy, Context.IntTy, Context.IntTy };
+	upcr_startup_initparray = CreateFunction(Context, "upcr_startup_initparray", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
+      }
+      // upcr_startup_initarray
+      {
+	QualType argTypes[] = { upcr_shared_ptr_t, Context.getPointerType(upcr_startup_val_t), Context.getPointerType(upcr_startup_diminfo_t), Context.IntTy, Context.IntTy, Context.IntTy };
+	upcr_startup_initarray = CreateFunction(Context, "upcr_startup_initarray", Context.VoidTy, argTypes, sizeof(argTypes)/sizeof(argTypes[0]));
       }
       // UPCR_GET_{,P}SHARED{,_STRICT}
       {
@@ -1779,7 +1795,7 @@ namespace {
 	  }
 	  if(Expr *Init = VD->getInit()) {
 	    Qualifiers Quals;
-	    SharedInitializers.push_back(std::make_pair(result, std::make_pair(TransformExpr(Init).get(), RealType)));
+	    SharedInitializers.push_back(std::make_pair(std::make_pair(result, VD), std::make_pair(TransformExpr(Init).get(), RealType)));
 	  }
 	  LocalStatics.push_back(result);
 	  return NULL;
@@ -2136,10 +2152,11 @@ namespace {
 
     typedef std::vector<std::pair<VarDecl *, Expr *> > DynamicInitializersType;
     DynamicInitializersType DynamicInitializers;
-    typedef std::vector<std::pair<VarDecl *, std::pair<Expr *, QualType> > > SharedInitializersType;
+    typedef std::vector<std::pair<std::pair<VarDecl *, VarDecl *>, std::pair<Expr *, QualType> > > SharedInitializersType;
     SharedInitializersType SharedInitializers;
     FunctionDecl * GetSharedInitializationFunction() {
       FunctionDecl *Result = Decls->CreateFunction(SemaRef.Context, "UPCRI_INIT_" + FileString, SemaRef.Context.VoidTy, 0, 0);
+      int SizeTypeSize = SemaRef.Context.getTypeSize(SemaRef.Context.getSizeType());
       SemaRef.ActOnStartOfFunctionDef(0, Result);
       Sema::SynthesizedFunctionScope Scope(SemaRef, Result);
       StmtResult Body;
@@ -2151,36 +2168,47 @@ namespace {
 	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
 	}
 	
-	Expr *Cond;
-	{
-	  std::vector<Expr*> args;
-	  Expr *mythread = BuildUPCRCall(Decls->upcr_mythread, args).get();
-	  Cond = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, mythread, CreateInteger(SemaRef.Context.IntTy, 0)).get();
-	}
-
 	std::vector<VarDecl *> Initializers;
+	std::vector<VarDecl *> Dimensions;
 	for(SharedInitializersType::iterator iter = SharedInitializers.begin(), end = SharedInitializers.end(); iter != end; ++iter) {
-	  std::string VarName = (Twine("_bupc_") + iter->first->getIdentifier()->getName() + "_val").str();
+	  QualType _bupc_val_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_val_t, ArrayType::Normal, 0);
+	  std::string VarName = (Twine("_bupc_") + iter->first.first->getIdentifier()->getName() + "_val").str();
 	  VarDecl *StoredInit = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(VarName),
-						iter->second.second, SemaRef.Context.getTrivialTypeSourceInfo(iter->second.second),
+						_bupc_val_type, SemaRef.Context.getTrivialTypeSourceInfo(iter->second.second),
 						SC_None);
 	  StoredInit->setInit(iter->second.first);
 	  Initializers.push_back(StoredInit);
 	  Statements.push_back(CreateSimpleDeclStmt(StoredInit));
-	}
-	
-	{
-	  SmallVector<Stmt*, 8> PutOnce;
-	  for(std::size_t i = 0; i < SharedInitializers.size(); ++i) {
-	    std::vector<Expr*> args;
-	    args.push_back(CreateSimpleDeclRef(SharedInitializers[i].first));
-	    args.push_back(CreateInteger(SemaRef.Context.IntTy, 0));
-	    args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
-	    args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
-	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
-	    PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT(Phaseless), args).get());
+
+	  std::vector<Expr*> args;
+	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
+	  int hasThread = 0;
+	  QualType ElemTy = iter->second.second.getCanonicalType();
+	  while(const ArrayType *AT = dyn_cast<ArrayType>(ElemTy.getTypePtr())) {
+	    if(const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+	      ArrayDimension *= CAT->getSize();
+	    } else if(const UPCThreadArrayType *TAT = dyn_cast<UPCThreadArrayType>(AT)) {
+	      if(TAT->getThread()) {
+		hasThread = 1;
+	      }
+	      ArrayDimension *= TAT->getSize();
+	    } else {
+	      assert(!"Other array types should not syntax check");
+	    }
+	    ElemTy = AT->getElementType();
 	  }
-	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, ArrayDimension, SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(IntegerLiteral::Create(SemaRef.Context, ArrayDimension, SemaRef.Context.getSizeType(), SourceLocation()));
+	  args.push_back(CreateInteger(SemaRef.Context.IntTy, hasThread));
+	  
+          QualType _bupc_diminfo_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_diminfo_t, ArrayType::Normal, 0);
+	  std::string DimName = (Twine("_bupc_") + iter->first.first->getIdentifier()->getName() + "_diminfo").str();
+	  VarDecl *DimInfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(), &SemaRef.Context.Idents.get(DimName),
+	                                      iter->second.second, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_diminfo_type), SC_None);
+	  Dimensions.push_back(DimInfo);
+	  SemaRef.AddInitializerToDecl(DimInfo, SemaRef.ActOnInitList(Decls->FakeLocation, args, Decls->FakeLocation).get(), false, false);
+	  Decl *diminfo_arr[] = { DimInfo };
+	  Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, diminfo_arr, 1)), SourceLocation(), SourceLocation()).get());
 	}
 	{
 	  for(std::size_t i = 0; i < DynamicInitializers.size(); ++i) {
@@ -2189,7 +2217,68 @@ namespace {
 	    Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, LHS, RHS).get());
 	  }
 	}
+        bool has_scalar = false;
+	{
+	  for(std::size_t i = 0; i < SharedInitializers.size(); ++i) {
+            if (SharedInitializers[i].first.second->getType()->isArrayType()) {
+	      QualType _bupc_val_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_val_t, ArrayType::Normal, 0);
+	      QualType _bupc_diminfo_type = SemaRef.Context.getIncompleteArrayType(Decls->upcr_startup_diminfo_t, ArrayType::Normal, 0);
+	      std::vector<Expr*> args;
+	      llvm::APInt ArrayDimension(SizeTypeSize, 1);
+	      QualType ElemTy = SharedInitializers[i].second.second.getCanonicalType();
+	      while(const ArrayType *AT = dyn_cast<ArrayType>(ElemTy.getTypePtr())) {
+	        if(const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+	          ArrayDimension *= CAT->getSize();
+	        } else if(const UPCThreadArrayType *TAT = dyn_cast<UPCThreadArrayType>(AT)) {
+	          ArrayDimension *= TAT->getSize();
+	        } else {
+	          assert(!"Other array types should not syntax check");
+	        }
+	        ElemTy = AT->getElementType();
+	      }
+	      uint32_t LayoutQualifier = SharedInitializers[i].first.second->getType().getQualifiers().getLayoutQualifier();
+	      llvm::APInt ElementSize(SizeTypeSize, SemaRef.Context.getTypeSizeInChars(ElemTy).getQuantity());
+	      llvm::APInt ElementsInBlock = llvm::APInt(SizeTypeSize, LayoutQualifier);
 
+	      args.push_back(CreateSimpleDeclRef(SharedInitializers[i].first.first));
+	      args.push_back(SemaRef.BuildDeclRefExpr(Initializers[i], _bupc_val_type, VK_LValue, SourceLocation()).get());
+	      args.push_back(SemaRef.BuildDeclRefExpr(Dimensions[i], _bupc_diminfo_type, VK_LValue, SourceLocation()).get());
+	      args.push_back(CreateInteger(SemaRef.Context.IntTy, 1));
+	      args.push_back(IntegerLiteral::Create(SemaRef.Context, ElementSize, SemaRef.Context.getSizeType(), SourceLocation()));
+	      args.push_back(IntegerLiteral::Create(SemaRef.Context, ElementsInBlock, SemaRef.Context.getSizeType(), SourceLocation()));
+              if (SharedInitializers[i].first.first->getType() == Decls->upcr_pshared_ptr_t)
+	        Statements.push_back(BuildUPCRCall(Decls->upcr_startup_initparray, args).get());
+	      else
+	        Statements.push_back(BuildUPCRCall(Decls->upcr_startup_initarray, args).get());
+	    } else
+              has_scalar = true;
+          }
+        }
+        if (has_scalar) {
+	  Expr *Cond;
+	  {
+	    std::vector<Expr*> args;
+	    Expr *mythread = BuildUPCRCall(Decls->upcr_mythread, args).get();
+	    Cond = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, mythread, CreateInteger(SemaRef.Context.IntTy, 0)).get();
+	  }
+	  {
+	    SmallVector<Stmt*, 8> PutOnce;
+	    for(std::size_t i = 0; i < SharedInitializers.size(); ++i) {
+              if (!SharedInitializers[i].first.second->getType()->isArrayType()) {
+	        std::vector<Expr*> args;
+	        args.push_back(CreateSimpleDeclRef(SharedInitializers[i].first.first));
+	        args.push_back(CreateInteger(SemaRef.Context.IntTy, 0));
+	        args.push_back(SemaRef.CreateBuiltinUnaryOp(SourceLocation(), UO_AddrOf, CreateSimpleDeclRef(Initializers[i])).get());
+	        args.push_back(CreateInteger(SemaRef.Context.IntTy, SemaRef.Context.getTypeSizeInChars(Initializers[i]->getType()).getQuantity()));
+	        bool Phaseless = SharedInitializers[i].first.first->getType() == Decls->upcr_pshared_ptr_t;
+	        PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT(Phaseless), args).get());
+	        Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL,
+				     SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(),
+				     SourceLocation(), NULL).get());
+	      }
+            }
+	  }
+        }
 	Body = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
       SemaRef.ActOnFinishFunctionBody(Result, Body.get());
