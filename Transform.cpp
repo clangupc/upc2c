@@ -2,6 +2,7 @@
 #include <clang/Sema/SemaConsumer.h>
 #include <clang/Sema/Scope.h>
 #include <clang/Lex/HeaderSearch.h>
+#include <clang/Lex/Preprocessor.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -15,8 +16,10 @@
 #include <clang/Driver/Options.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Path.h>
+#include <llvm/Support/FileSystem.h>
 #include <string>
 #include <cctype>
+#include <memory>
 #include "../../lib/Sema/TreeTransform.h"
 
 using namespace clang;
@@ -57,7 +60,7 @@ namespace {
       else if (const ArrayType* ATy = dyn_cast<ArrayType>(BaseType))
 	BaseType = ATy->getElementType();
       else if (const FunctionType* FTy = BaseType->getAs<FunctionType>())
-	BaseType = FTy->getResultType();
+	BaseType = FTy->getReturnType();
       else if (const VectorType *VTy = BaseType->getAs<VectorType>())
 	BaseType = VTy->getElementType();
       else if (const ReferenceType *RTy = BaseType->getAs<ReferenceType>())
@@ -635,7 +638,7 @@ namespace {
     }
     ExprResult MaybeAdjustForArray(const ArrayDimensionT & Dims, Expr * E, BinaryOperatorKind Op) {
       if(Dims.ArrayDimension == 1 && !Dims.E && !Dims.HasThread) {
-	return SemaRef.Owned(E);
+	return E;
       } else {
 	Expr *Dimension = IntegerLiteral::Create(SemaRef.Context, Dims.ArrayDimension, SemaRef.Context.getSizeType(), SourceLocation());
 	if(Dims.HasThread) {
@@ -683,22 +686,22 @@ namespace {
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_notify, args, S->getLocStart()).get();
-      return SemaRef.Owned(result);
+      return result;
     }
     StmtResult TransformUPCWaitStmt(UPCWaitStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_wait, args, S->getLocStart()).get();
-      return SemaRef.Owned(result);
+      return result;
     }
     StmtResult TransformUPCBarrierStmt(UPCBarrierStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
       Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args, S->getLocStart()).get();
-      return SemaRef.Owned(result);
+      return result;
     }
     StmtResult TransformUPCFenceStmt(UPCFenceStmt *S) {
       std::vector<Expr*> args;
       Stmt *result = BuildUPCRCall(Decls->upcr_poll, args, S->getLocStart()).get();
-      return SemaRef.Owned(result);
+      return result;
     }
     ExprResult TransformUPCThreadExpr(UPCThreadExpr *E) {
       std::vector<Expr*> args;
@@ -712,7 +715,7 @@ namespace {
     }
     ExprResult TransformInitializer(Expr *Init, bool CXXDirectInit) {
       if(!Init)
-	return SemaRef.Owned(Init);
+	return Init;
 
       // Have to handle this separately, as TreeTransform
       // strips off ImplicitCastExprs in TransformInitializer.
@@ -1322,7 +1325,7 @@ namespace {
 	{
 	llvm::APSInt Value;
 	SemaRef.VerifyIntegerConstantExpression(E, &Value);
-	return SemaRef.Owned(IntegerLiteral::Create(SemaRef.Context, Value, E->getType(), SourceLocation()));
+	return IntegerLiteral::Create(SemaRef.Context, Value, E->getType(), SourceLocation());
 	}
       case UETT_SizeOf:
 	{
@@ -1384,7 +1387,7 @@ namespace {
 	}
       }
       
-      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
       
       // Transform the increment
       ExprResult Inc = TransformExpr(S->getInc());
@@ -1507,7 +1510,7 @@ namespace {
 	}
       }
       
-      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.take()));
+      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
       if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
 	return StmtError();
       
@@ -1559,7 +1562,7 @@ namespace {
 	if(!Result.isInvalid() && isa<NullStmt>(Result.get()))
 	  continue;
 
-	Statements.push_back(Result.takeAs<Stmt>());
+	Statements.push_back(Result.getAs<Stmt>());
       }
 
       if (SubStmtInvalid)
@@ -1567,7 +1570,7 @@ namespace {
 
       if (!getDerived().AlwaysRebuild() &&
 	  !SubStmtChanged)
-	return SemaRef.Owned(S);
+	return S;
 
       return getDerived().RebuildCompoundStmt(S->getLBracLoc(),
 					      Statements,
@@ -1581,7 +1584,7 @@ namespace {
       SmallVector<Stmt*, 2> Statements;
       std::vector<Expr*> args;
       FunctionDecl * CurFunction = SemaRef.getCurFunctionDecl();
-      QualType ResultType = CurFunction->getResultType();
+      QualType ResultType = CurFunction->getReturnType();
       if(ResultType->isVoidType() && Result) {
 	// Just evaluate it
 	Statements.push_back(Result);
@@ -1594,7 +1597,7 @@ namespace {
 	Result = V;
       }
       Statements.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, S->getReturnLoc()).get());
-      Statements.push_back(SemaRef.ActOnReturnStmt(S->getReturnLoc(), Result).get());
+      Statements.push_back(SemaRef.BuildReturnStmt(S->getReturnLoc(), Result).get());
       return SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
     }
     StmtResult TransformUPCPragmaStmt(UPCPragmaStmt *) {
@@ -1761,6 +1764,68 @@ namespace {
 
       return Result;
     }
+
+    // The original version of this in TreeTransform doesn't quite work
+    // for us.
+    ParmVarDecl *TransformFunctionTypeParam(
+        ParmVarDecl *OldParm, int indexAdjustment,
+        Optional<unsigned> NumExpansions,
+        bool ExpectParameterPack) {
+      TypeSourceInfo *OldDI = OldParm->getTypeSourceInfo();
+      TypeSourceInfo *NewDI = nullptr;
+
+      if (NumExpansions && isa<PackExpansionType>(OldDI->getType())) {
+        // If we're substituting into a pack expansion type and we know the
+        // length we want to expand to, just substitute for the pattern.
+        TypeLoc OldTL = OldDI->getTypeLoc();
+        PackExpansionTypeLoc OldExpansionTL = OldTL.castAs<PackExpansionTypeLoc>();
+
+        TypeLocBuilder TLB;
+        TypeLoc NewTL = OldDI->getTypeLoc();
+        TLB.reserve(NewTL.getFullDataSize());
+
+        QualType Result = getDerived().TransformType(TLB,
+                                                     OldExpansionTL.getPatternLoc());
+        if (Result.isNull())
+          return nullptr;
+
+        Result = RebuildPackExpansionType(Result,
+                                          OldExpansionTL.getPatternLoc().getSourceRange(),
+                                          OldExpansionTL.getEllipsisLoc(),
+                                          NumExpansions);
+        if (Result.isNull())
+          return nullptr;
+
+        PackExpansionTypeLoc NewExpansionTL
+          = TLB.push<PackExpansionTypeLoc>(Result);
+        NewExpansionTL.setEllipsisLoc(OldExpansionTL.getEllipsisLoc());
+        NewDI = TLB.getTypeSourceInfo(SemaRef.Context, Result);
+      } else
+        NewDI = getDerived().TransformType(OldDI);
+      if (!NewDI)
+        return nullptr;
+      
+      if (NewDI == OldDI && indexAdjustment == 0)
+        return OldParm;
+
+      // The original DC is in the wrong ASTContext.  That's
+      // fine for template instantiation, but it doesn't work
+      // when we're creating an entirely new AST.
+      DeclContext *NewDC = cast<DeclContext>(TransformDecl(SourceLocation(),
+        cast<Decl>(OldParm->getDeclContext())));
+      ParmVarDecl *newParm = ParmVarDecl::Create(SemaRef.Context,
+                                                 NewDC,
+                                                 OldParm->getInnerLocStart(),
+                                                 OldParm->getLocation(),
+                                                 OldParm->getIdentifier(),
+                                                 NewDI->getType(),
+                                                 NewDI,
+                                                 OldParm->getStorageClass(),
+                                                 /* DefArg */ nullptr);
+      newParm->setScopeInfo(OldParm->getFunctionScopeDepth(),
+                            OldParm->getFunctionScopeIndex() + indexAdjustment);
+      return newParm;
+    }
     // Transforms the type of a declaration by adding
     // typedefs for anonymous structs/unions
     TypedefDecl *MakeTypedefForAnonRecordImpl(QualType Element) {
@@ -1840,7 +1905,11 @@ namespace {
 	  FnName.setName(&SemaRef.Context.Idents.get("va_copy"));
 	}
 
-	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? TransformType(FD->getTypeSourceInfo()) : 0;
+        // The TypeSourceInfo for the function cannot be
+        // initialized correctly until the parameter declarations
+        // have been processed.  getTrivialTypeSourceInfo
+        // is good enough for our purposes.
+	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? SemaRef.Context.getTrivialTypeSourceInfo(TransformType(FD->getType())) : 0;
 	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
 				    FnName, TransformType(FD->getType()),
 				    FTSI,
@@ -1898,7 +1967,7 @@ namespace {
 	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getLocEnd()).get());
 	    }
 	    if(isMain)
-	      Body.push_back(SemaRef.ActOnReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
+	      Body.push_back(SemaRef.BuildReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
 	    FnBody = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Body, false).get();
 	  }
 	  SemaRef.ActOnFinishFunctionBody(result, FnBody);
@@ -2160,7 +2229,7 @@ namespace {
 	  const char * start = llvm::sys::path::filename(Parent).begin();
 	  StringRef TestFile = StringRef(start, iter->end() - start);
 	  const DirectoryLookup *CurDir = NULL;
-	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, true, NULL, CurDir, NULL, NULL, NULL, NULL);
+	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, NULL, NULL, NULL, NULL);
 	  if(found) {
 	    if(found == SemaRef.SourceMgr.getFileManager().getFile(*iter)) {
 	      relativeFilePath = TestFile;
@@ -2188,6 +2257,7 @@ namespace {
     std::map<StringRef, StringRef> UPCHeaderRenames;
     Decl *TransformTranslationUnitDecl(TranslationUnitDecl *D) {
       TranslationUnitDecl *result = SemaRef.Context.getTranslationUnitDecl();
+      transformedLocalDecl(D, result);
       Scope CurScope(0, Scope::DeclScope, SemaRef.getDiagnostics());
       SemaRef.setCurScope(&CurScope);
       SemaRef.PushDeclContext(&CurScope, result);
@@ -2309,7 +2379,8 @@ namespace {
 	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, hasThread), SemaRef.Context.getSizeType(), SourceLocation()));
 	  args.push_back(IntegerLiteral::Create(SemaRef.Context, ElementSize, SemaRef.Context.getSizeType(), SourceLocation()));
 	  // FIXME: encode the correct mangled type
-	  args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getPointerType(SemaRef.Context.getConstType(SemaRef.Context.CharTy)), SourceLocation()));
+          const char MangledType[] = "";
+	  args.push_back(StringLiteral::Create(SemaRef.Context, "", StringLiteral::Ascii, false, SemaRef.Context.getConstantArrayType(SemaRef.Context.getConstType(SemaRef.Context.CharTy), llvm::APInt(64, sizeof(MangledType)), ArrayType::Normal, 0), SourceLocation()));
 	  if(Phaseless) {
 	    PInitializers.push_back(BuildUPCRCall(Decls->UPCRT_STARTUP_PSHALLOC, args).get());
 	  } else {
@@ -2467,9 +2538,9 @@ namespace {
       TranslationUnitDecl *top = Context.getTranslationUnitDecl();
       // Copy the ASTContext and Sema
       LangOptions LangOpts = Context.getLangOpts();
-      ASTContext newContext(LangOpts, Context.getSourceManager(), &Context.getTargetInfo(),
-			    Context.Idents, Context.Selectors, Context.BuiltinInfo,
-			    Context.getTypes().size());
+      ASTContext newContext(LangOpts, Context.getSourceManager(),
+			    Context.Idents, Context.Selectors, Context.BuiltinInfo);
+      newContext.InitBuiltinTypes(Context.getTargetInfo());
       newContext.getDiagnostics().setIgnoreAllWarnings(true);
       ASTConsumer nullConsumer;
       UPCRDecls Decls(newContext);
@@ -2477,7 +2548,7 @@ namespace {
       RemoveUPCTransform Trans(newSema, &Decls, fileid);
       Decl *Result = Trans.TransformTranslationUnitDecl(top);
       std::string error;
-      llvm::raw_fd_ostream OS(filename.c_str(), error);
+      llvm::raw_fd_ostream OS(filename.c_str(), error, llvm::sys::fs::F_None);
       OS << "#include <upcr.h>\n";
 
       Trans.PrintIncludes(OS);
@@ -2542,10 +2613,10 @@ int main(int argc, const char ** argv) {
   using namespace clang::driver;
 
   // Parse the arguments
-  OwningPtr<OptTable> Opts(createDriverOptTable());
+  std::unique_ptr<OptTable> Opts(createDriverOptTable());
   unsigned MissingArgIndex, MissingArgCount;
   const unsigned IncludedFlagsBitmask = options::CC1Option;
-  OwningPtr<InputArgList> Args(
+  std::unique_ptr<InputArgList> Args(
     Opts->ParseArgs(argv, argv + argc,MissingArgIndex, MissingArgCount, IncludedFlagsBitmask));
 
   // Read the input and output files and adjust the arguments
