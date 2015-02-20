@@ -2143,8 +2143,11 @@ namespace {
           Name = mangleLocalRecordName(Name);
           NewDC = SemaRef.Context.getTranslationUnitDecl();
         }
-	Decl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getLocStart(), TD->getLocation(), Name, Ty);
+	TypedefDecl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getLocStart(), TD->getLocation(), Name, Ty);
         copyAttrs(D, Result);
+        if(TD->isModed()) {
+          Result->setModedTypeSourceInfo(Ty, TransformType(TD->getUnderlyingType()));
+        }
         transformedLocalDecl(TD, Result);
         if(!Checker.Found && isa<FunctionDecl>(TD->getDeclContext())) {
           // Typedefs are always promoted to the global scope
