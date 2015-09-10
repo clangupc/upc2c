@@ -2232,7 +2232,7 @@ namespace {
 	  const char * start = llvm::sys::path::filename(Parent).begin();
 	  StringRef TestFile = StringRef(start, iter->end() - start);
 	  const DirectoryLookup *CurDir = NULL;
-	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, NULL, NULL, NULL, NULL);
+	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, llvm::None, NULL, NULL, NULL);
 	  if(found) {
 	    if(found == SemaRef.SourceMgr.getFileManager().getFile(*iter)) {
 	      relativeFilePath = TestFile;
@@ -2550,7 +2550,7 @@ namespace {
       Sema newSema(S->getPreprocessor(), newContext, nullConsumer);
       RemoveUPCTransform Trans(newSema, &Decls, fileid);
       Decl *Result = Trans.TransformTranslationUnitDecl(top);
-      std::string error;
+      std::error_code error;
       llvm::raw_fd_ostream OS(filename.c_str(), error, llvm::sys::fs::F_None);
       OS << "#include <upcr.h>\n";
 
@@ -2601,8 +2601,8 @@ namespace {
   class RemoveUPCAction : public clang::ASTFrontendAction {
   public:
     RemoveUPCAction(StringRef OutputFile, StringRef FileString, bool Lines) : filename(OutputFile), fileid(FileString), lines(Lines) {}
-    virtual clang::ASTConsumer *CreateASTConsumer(clang::CompilerInstance &Compiler, llvm::StringRef InFile) {
-      return new RemoveUPCConsumer(filename, fileid, lines);
+    virtual std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &Compiler, llvm::StringRef InFile) {
+      return std::unique_ptr<ASTConsumer>(new RemoveUPCConsumer(filename, fileid, lines));
     }
     std::string filename;
     std::string fileid;
