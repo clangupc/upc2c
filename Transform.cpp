@@ -2232,7 +2232,7 @@ namespace {
 	  const char * start = llvm::sys::path::filename(Parent).begin();
 	  StringRef TestFile = StringRef(start, iter->end() - start);
 	  const DirectoryLookup *CurDir = NULL;
-	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, llvm::None, NULL, NULL, NULL);
+	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, llvm::None, NULL, NULL, NULL, NULL);
 	  if(found) {
 	    if(found == SemaRef.SourceMgr.getFileManager().getFile(*iter)) {
 	      relativeFilePath = TestFile;
@@ -2619,27 +2619,28 @@ int main(int argc, const char ** argv) {
   std::unique_ptr<OptTable> Opts(createDriverOptTable());
   unsigned MissingArgIndex, MissingArgCount;
   const unsigned IncludedFlagsBitmask = options::CC1Option;
-  std::unique_ptr<InputArgList> Args(
-    Opts->ParseArgs(argv, argv + argc,MissingArgIndex, MissingArgCount, IncludedFlagsBitmask));
+  InputArgList Args(
+      Opts->ParseArgs(llvm::makeArrayRef(argv, argc),
+                      MissingArgIndex, MissingArgCount, IncludedFlagsBitmask));
 
   // Read the input and output files and adjust the arguments
-  std::string InputFile = Args->getLastArgValue(options::OPT_INPUT);
+  std::string InputFile = Args.getLastArgValue(options::OPT_INPUT);
   std::string DefaultOutputFile = (llvm::sys::path::stem(InputFile) + ".trans.c").str();
-  std::string OutputFile = Args->getLastArgValue(options::OPT_o, DefaultOutputFile);
-  Args->eraseArg(options::OPT_o);
+  std::string OutputFile = Args.getLastArgValue(options::OPT_o, DefaultOutputFile);
+  Args.eraseArg(options::OPT_o);
 
-  bool Lines = !Args->hasArg(options::OPT_P);
-  Args->eraseArg(options::OPT_P);
+  bool Lines = !Args.hasArg(options::OPT_P);
+  Args.eraseArg(options::OPT_P);
 
   // Write the arguments to a vector
   ArgStringList NewOptions;
-  for(ArgList::const_iterator iter = Args->begin(), end = Args->end(); iter != end; ++iter) {
+  for(ArgList::const_iterator iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
     // Always parse as UPC
     if((*iter)->getOption().getID() == options::OPT_INPUT &&
-       iter != Args->begin()) {
+       iter != Args.begin()) {
       NewOptions.push_back("-xupc");
     }
-    (*iter)->renderAsInput(*Args, NewOptions);
+    (*iter)->renderAsInput(Args, NewOptions);
   }
   // Disable CodeGen
   NewOptions.push_back("-fsyntax-only");
