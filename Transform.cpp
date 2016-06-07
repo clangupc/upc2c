@@ -1167,6 +1167,16 @@ namespace {
 	Expr *LHS = TransformExpr(E->getLHS()).get();
 	Expr *RHS = TransformExpr(E->getRHS()).get();
 	return BuildUPCRStore(LHS, RHS, E->getLHS()->getType());
+      } else if (E->getOpcode() == BO_LAnd || E->getOpcode() == BO_LOr) {
+        // handle pointers-to-shared in && and ||
+	bool LHSIsShared = isPointerToShared(E->getLHS()->getType());
+	bool RHSIsShared = isPointerToShared(E->getRHS()->getType());
+        if(LHSIsShared || RHSIsShared) {
+          ExprResult LHS = TransformCondition(E->getLHS());
+          ExprResult RHS = TransformCondition(E->getRHS());
+          return RebuildBinaryOperator(E->getOperatorLoc(), E->getOpcode(),
+                                       LHS.get(), RHS.get());
+        }
       } else {
 	Expr *LHS = E->getLHS();
 	Expr *RHS = E->getRHS();
