@@ -2220,6 +2220,12 @@ namespace {
 	return EmptyDecl::Create(SemaRef.Context, DC, D->getLocation());
       } else if(PragmaPupcDecl *PD = dyn_cast<PragmaPupcDecl>(D)) {
         return PragmaPupcDecl::Create(SemaRef.Context, DC, PD->getLocation(), PD->getOn());
+      } else if(StaticAssertDecl *SAD = dyn_cast<StaticAssertDecl>(D)) {
+        ExprResult E = TransformExpr(SAD->getAssertExpr());
+        StringLiteral *Message = cast<StringLiteral>(TransformExpr(SAD->getMessage()).get());
+        return StaticAssertDecl::Create(SemaRef.Context, DC, SAD->getLocation(),
+                                        E.get(), Message, SAD->getRParenLoc(),
+                                        SAD->isFailed());
       } else {
 	assert(!"Unknown Decl");
       }
