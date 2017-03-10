@@ -1376,29 +1376,14 @@ namespace {
       // Transform the initialization statement
       StmtResult Init = getDerived().TransformStmt(S->getInit());
 
+
       // Transform the condition
-      ExprResult Cond;
-      VarDecl *ConditionVar = 0;
-      if (S->getConditionVariable()) {
-	ConditionVar
-        = cast_or_null<VarDecl>(
-                     TransformDefinition(
-                                        S->getConditionVariable()->getLocation(),
-                                                      S->getConditionVariable()));
-      } else {
-	Cond = TransformExpr(S->getCond());
-	
-	if (S->getCond()) {
-	  // Convert the condition to a boolean value.
-	  ExprResult CondE = getSema().ActOnBooleanCondition(0, S->getForLoc(),
-							     Cond.get());
-	  
-	  Cond = CondE.get();
-	}
-      }
-      
-      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
-      
+      Sema::ConditionResult Cond = getDerived().TransformCondition(
+        S->getForLoc(), S->getConditionVariable(), S->getCond(),
+        Sema::ConditionKind::Boolean);
+      if (Cond.isInvalid())
+        return StmtError();
+
       // Transform the increment
       ExprResult Inc = TransformExpr(S->getInc());
       if (Inc.isInvalid())
@@ -1410,7 +1395,7 @@ namespace {
       StmtResult Body = TransformStmt(S->getBody());
 
       StmtResult PlainFor = SemaRef.ActOnForStmt(S->getForLoc(), S->getLParenLoc(),
-						 Init.get(), FullCond, ConditionVar,
+						 Init.get(), Cond,
 						 FullInc, S->getRParenLoc(), Body.get());
 
       // If the thread affinity is not specified, upc_forall is
@@ -1420,37 +1405,42 @@ namespace {
       }
 
       ExprResult Afnty = TransformExpr(S->getAfnty());
-      ExprResult ThreadTest;
+      ExprResult ThreadTest_;
       if(isPointerToShared(S->getAfnty()->getType())) {
 	bool Phaseless = isPhaseless(S->getAfnty()->getType()->getAs<PointerType>()->getPointeeType());
 	std::vector<Expr*> args;
 	args.push_back(Afnty.get());
-	ThreadTest = BuildUPCRCall(Phaseless?Decls->upcr_hasMyAffinity_pshared:Decls->upcr_hasMyAffinity_shared, args);
+	ThreadTest_ = BuildUPCRCall(Phaseless?Decls->upcr_hasMyAffinity_pshared:Decls->upcr_hasMyAffinity_shared, args);
       } else {
 	std::vector<Expr*> args;
 	Expr * Affinity = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Rem, BuildParens(Afnty.get()).get(), BuildUPCRCall(Decls->upcr_threads, args).get()).get();
-	ThreadTest = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, Affinity, BuildUPCRCall(Decls->upcr_mythread, args).get());
+	ThreadTest_ = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, Affinity, BuildUPCRCall(Decls->upcr_mythread, args).get());
       }
 
-      StmtResult UPCBody = SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ThreadTest.get()), NULL, Body.get(), SourceLocation(), NULL);
+      Sema::ConditionResult ThreadTest = SemaRef.ActOnCondition(nullptr, SourceLocation(), ThreadTest_.get(), Sema::ConditionKind::Boolean);
+
+      StmtResult UPCBody = SemaRef.ActOnIfStmt(SourceLocation(), false, nullptr, ThreadTest, Body.get(), SourceLocation(), nullptr);
 
       StmtResult UPCFor = SemaRef.ActOnForStmt(S->getForLoc(), S->getLParenLoc(),
-						 Init.get(), FullCond, ConditionVar,
+						 Init.get(), Cond,
 						 FullInc, S->getRParenLoc(), UPCBody.get());
 
-      Expr * ForAllCtrl = CreateSimpleDeclRef(Decls->upcrt_forall_control);
+      Expr * ForAllCtrl_ = CreateSimpleDeclRef(Decls->upcrt_forall_control);
       {
         if (SemaRef.Context.getLangOpts().UPCTLDEnable)
-          ForAllCtrl = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl)).get();
+          ForAllCtrl_ = BuildTLDRefExpr(dyn_cast<DeclRefExpr>(ForAllCtrl_)).get();
       }
+      
+      Sema::ConditionResult ForAllCtrl = SemaRef.ActOnCondition(
+        nullptr, SourceLocation(), ForAllCtrl_, Sema::ConditionKind::Boolean);
 
       StmtResult UPCForWrapper;
       {
 	Sema::CompoundScopeRAII BodyScope(SemaRef);
 	SmallVector<Stmt*, 8> Statements;
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl, CreateInteger(SemaRef.Context.IntTy, 1)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl_, CreateInteger(SemaRef.Context.IntTy, 1)).get());
 	Statements.push_back(UPCFor.get());
-	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl, CreateInteger(SemaRef.Context.IntTy, 0)).get());
+	Statements.push_back(SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, ForAllCtrl_, CreateInteger(SemaRef.Context.IntTy, 0)).get());
 
 	UPCForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), Statements, false);
       }
@@ -1461,7 +1451,7 @@ namespace {
 	PlainForWrapper = SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PlainFor.get(), false);
       }
 
-      return SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(ForAllCtrl), NULL, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
+      return SemaRef.ActOnIfStmt(SourceLocation(), false, nullptr, ForAllCtrl, PlainForWrapper.get(), SourceLocation(), UPCForWrapper.get());
     }
     ExprResult TransformCondition(Expr *E) {
       ExprResult Result = TransformExpr(E);
@@ -1475,6 +1465,31 @@ namespace {
 	return Result;
       }
     }
+
+    Sema::ConditionResult TransformCondition(
+      SourceLocation Loc, VarDecl *Var, Expr *Expr, Sema::ConditionKind Kind) {
+      if (Var) {
+        VarDecl *ConditionVar = cast_or_null<VarDecl>(
+          getDerived().TransformDefinition(Var->getLocation(), Var));
+
+        if (!ConditionVar)
+          return Sema::ConditionError();
+
+        return getSema().ActOnConditionVariable(ConditionVar, Loc, Kind);
+      }
+
+      if (Expr) {
+        ExprResult CondExpr = TransformCondition(Expr);
+
+        if (CondExpr.isInvalid())
+          return Sema::ConditionError();
+
+        return getSema().ActOnCondition(nullptr, Loc, CondExpr.get(), Kind);
+      }
+
+      return Sema::ConditionResult();
+    }
+
     ExprResult TransformConditionalOperator(ConditionalOperator *E) {
       // The only difference from the default is this TransformCondition vs TransformExpr:
       ExprResult Cond = TransformCondition(E->getCond());
@@ -1490,54 +1505,6 @@ namespace {
 	return ExprError();
 
       return getDerived().RebuildConditionalOperator(Cond.get(), E->getQuestionLoc(), LHS.get(), E->getColonLoc(), RHS.get());
-    }
-    StmtResult TransformIfStmt(IfStmt *S) {
-      // Transform the condition
-      ExprResult Cond;
-      VarDecl *ConditionVar = 0;
-      if (S->getConditionVariable()) {
-	ConditionVar
-	  = cast_or_null<VarDecl>(
-                       getDerived().TransformDefinition(
-                                          S->getConditionVariable()->getLocation(),
-                                                        S->getConditionVariable()));
-	if (!ConditionVar)
-	  return StmtError();
-      } else {
-	Cond = TransformCondition(S->getCond());
-	
-	if (Cond.isInvalid())
-	  return StmtError();
-	
-	// Convert the condition to a boolean value.
-	if (S->getCond()) {
-	  ExprResult CondE = getSema().ActOnBooleanCondition(0, S->getIfLoc(),
-							     Cond.get());
-	  if (CondE.isInvalid())
-	    return StmtError();
-	  
-	  Cond = CondE.get();
-	}
-      }
-      
-      Sema::FullExprArg FullCond(getSema().MakeFullExpr(Cond.get()));
-      if (!S->getConditionVariable() && S->getCond() && !FullCond.get())
-	return StmtError();
-      
-      // Transform the "then" branch.
-      StmtResult Then = getDerived().TransformStmt(S->getThen());
-      if (Then.isInvalid())
-	return StmtError();
-
-      // Transform the "else" branch.
-      StmtResult Else = getDerived().TransformStmt(S->getElse());
-      if (Else.isInvalid())
-	return StmtError();
-
-      return getDerived().RebuildIfStmt(S->getIfLoc(), FullCond, ConditionVar,
-                                        Then.get(),
-                                        S->getElseLoc(), Else.get());
-
     }
     using TreeTransformUPC::TransformCompoundStmt;
     StmtResult TransformCompoundStmt(CompoundStmt *S,
@@ -2111,7 +2078,7 @@ namespace {
 	      for(IndirectFieldDecl::chain_iterator chain_iter = IFD->chain_begin(), chain_end = IFD->chain_end(); chain_iter != chain_end; ++chain_iter, ++OutIt) {
 		*OutIt = cast<NamedDecl>(TransformDecl(SourceLocation(), *chain_iter));
 	      }
-	      IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), TransformType(IFD->getType()), Chaining, IFD->getChainingSize());
+	      IndirectFieldDecl *NewIFD = IndirectFieldDecl::Create(SemaRef.Context, Result, IFD->getLocation(), IFD->getIdentifier(), TransformType(IFD->getType()), MutableArrayRef<NamedDecl *>(Chaining, IFD->getChainingSize()));
 	      NewIFD->setImplicit(true);
 	      transformedLocalDecl(IFD, NewIFD);
               copyAttrs(IFD, NewIFD);
@@ -2129,7 +2096,7 @@ namespace {
 	    }
 	  }
 	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
-	  SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getRBraceLoc());
+	  SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getBraceRange());
 	}
         if(isa<FunctionDecl>(RD->getDeclContext())) {
           // Promote local struct declarations to the global scope
@@ -2202,7 +2169,7 @@ namespace {
 
 	  }
 
-	  SemaRef.ActOnEnumBody(Result->getLocation(), SourceLocation(), Result->getRBraceLoc(), Result, Enumerators, 0, 0);
+	  SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, nullptr);
 	}
 
 	return Result;
@@ -2474,12 +2441,13 @@ namespace {
 	  Statements.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args).get());
 	}
 	
-	Expr *Cond;
+	Expr *Cond_;
 	{
 	  std::vector<Expr*> args;
 	  Expr *mythread = BuildUPCRCall(Decls->upcr_mythread, args).get();
-	  Cond = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, mythread, CreateInteger(SemaRef.Context.IntTy, 0)).get();
+	  Cond_ = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_EQ, mythread, CreateInteger(SemaRef.Context.IntTy, 0)).get();
 	}
+        Sema::ConditionResult Cond = SemaRef.ActOnCondition(nullptr, SourceLocation(), Cond_, Sema::ConditionKind::Boolean);
 
 	std::vector<VarDecl *> Initializers;
 	for(SharedInitializersType::iterator iter = SharedInitializers.begin(), end = SharedInitializers.end(); iter != end; ++iter) {
@@ -2503,7 +2471,7 @@ namespace {
 	    bool Phaseless = SharedInitializers[i].first->getType() == Decls->upcr_pshared_ptr_t;
 	    PutOnce.push_back(BuildUPCRCall(Decls->UPCR_PUT(Phaseless), args).get());
 	  }
-	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), SemaRef.MakeFullExpr(Cond), NULL, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), NULL).get());
+	  Statements.push_back(SemaRef.ActOnIfStmt(SourceLocation(), false, nullptr, Cond, SemaRef.ActOnCompoundStmt(SourceLocation(), SourceLocation(), PutOnce, false).get(), SourceLocation(), nullptr).get());
 	}
 	{
 	  for(std::size_t i = 0; i < DynamicInitializers.size(); ++i) {
