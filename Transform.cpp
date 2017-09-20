@@ -2032,7 +2032,7 @@ namespace {
 	  transformedLocalDecl(D, result);
           copyAttrs(D, result);
 	  if(Expr *Init = VD->getInit()) {
-	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit(), false);
+	    SemaRef.AddInitializerToDecl(result, TransformExpr(Init).get(), VD->isDirectInit());
 	  }
           if(shouldUseTLD(VD)) {
             LocalStatics.push_back(result);
@@ -2379,7 +2379,7 @@ namespace {
 	  _bupc_info = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
 						 &SemaRef.Context.Idents.get("_bupc_info"), _bupc_info_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_info_type), SC_None);
 	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
-	  SemaRef.AddInitializerToDecl(_bupc_info, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false, false);
+	  SemaRef.AddInitializerToDecl(_bupc_info, SemaRef.ActOnInitList(Decls->FakeLocation, Initializers, Decls->FakeLocation).get(), false);
 	  Decl *_bupc_info_arr[] = { _bupc_info };
 	  Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_info_arr, 1)), SourceLocation(), SourceLocation()).get());
 	}
@@ -2387,7 +2387,7 @@ namespace {
 	  _bupc_pinfo = VarDecl::Create(SemaRef.Context, Result, SourceLocation(), SourceLocation(),
 						 &SemaRef.Context.Idents.get("_bupc_pinfo"), _bupc_pinfo_type, SemaRef.Context.getTrivialTypeSourceInfo(_bupc_pinfo_type), SC_None);
 	  // InitializerList semantics vary depending on whether the SourceLocations are valid.
-	  SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, PInitializers, Decls->FakeLocation).get(), false, false);
+	  SemaRef.AddInitializerToDecl(_bupc_pinfo, SemaRef.ActOnInitList(Decls->FakeLocation, PInitializers, Decls->FakeLocation).get(), false);
 	  Decl *_bupc_pinfo_arr[] = { _bupc_pinfo };
 	  Statements.push_back(SemaRef.ActOnDeclStmt(Sema::DeclGroupPtrTy::make(DeclGroupRef::Create(SemaRef.Context, _bupc_pinfo_arr, 1)), SourceLocation(), SourceLocation()).get());
 	}
