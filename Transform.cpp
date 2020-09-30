@@ -582,7 +582,8 @@ namespace {
       return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation());
     }
     Expr * CreateSimpleDeclRef(VarDecl *VD) {
-      return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()).get();
+      //return SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()).get();
+      return dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(VD, VD->getType(), VK_LValue, SourceLocation()));
     }
     int AnonRecordID;
     int StaticLocalVarID;
@@ -685,22 +686,26 @@ namespace {
     }
     StmtResult TransformUPCNotifyStmt(UPCNotifyStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_notify, args, S->getLocStart()).get();
+      //Stmt *result = BuildUPCRCall(Decls->upcr_notify, args, S->getLocStart()).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_notify, args, S->getBeginLoc()).get();
       return result;
     }
     StmtResult TransformUPCWaitStmt(UPCWaitStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_wait, args, S->getLocStart()).get();
+      //Stmt *result = BuildUPCRCall(Decls->upcr_wait, args, S->getLocStart()).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_wait, args, S->getBeginLoc()).get();
       return result;
     }
     StmtResult TransformUPCBarrierStmt(UPCBarrierStmt *S) {
       std::vector<Expr*> args = BuildUPCBarrierArgs(S->getIdValue());
-      Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args, S->getLocStart()).get();
+      //Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args, S->getLocStart()).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_barrier, args, S->getBeginLoc()).get();
       return result;
     }
     StmtResult TransformUPCFenceStmt(UPCFenceStmt *S) {
       std::vector<Expr*> args;
-      Stmt *result = BuildUPCRCall(Decls->upcr_poll, args, S->getLocStart()).get();
+      //Stmt *result = BuildUPCRCall(Decls->upcr_poll, args, S->getLocStart()).get();
+      Stmt *result = BuildUPCRCall(Decls->upcr_poll, args, S->getBeginLoc()).get();
       return result;
     }
     ExprResult TransformUPCThreadExpr(UPCThreadExpr *E) {
@@ -1114,7 +1119,8 @@ namespace {
 	bool Phaseless = isPhaseless(ArgType);
 	QualType PtrType = Phaseless? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
 	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
-	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	//Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	Expr * TmpPtr = dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()));
 	Expr * SaveArg = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getSubExpr()).get()).get()).get();
 	QualType ResultType = TransformType(ArgType.getUnqualifiedType());
 	Expr * LoadVar = CreateSimpleDeclRef(CreateTmpVar(ResultType));
@@ -1262,7 +1268,8 @@ namespace {
 	QualType PtrType = Phaseless? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
 	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
 	BinaryOperatorKind Opc = BinaryOperator::getOpForCompoundAssignment(E->getOpcode());
-	Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	//Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
+	Expr * TmpPtr = dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()));
 	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
 	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
 	Expr * LHSVal = BuildUPCRLoad(TmpPtr, Ty);
@@ -1620,7 +1627,8 @@ namespace {
 	    isa<TagDecl>(Decls[0]) &&
 	    isPointerToShared(GetBaseType(getDeclType(Transformed))))
 	{
-	  SplitDecls.push_back(RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc()).get());
+	  //SplitDecls.push_back(RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc()).get());
+	  SplitDecls.push_back(RebuildDeclStmt(Decls, S->getBeginLoc(), S->getEndLoc()).get());
 	  Decls.clear();
 	}
 	
@@ -1631,7 +1639,8 @@ namespace {
       if(Decls.empty()) {
 	return SemaRef.ActOnNullStmt(S->getEndLoc());
       } else {
-	return RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc());
+	//return RebuildDeclStmt(Decls, S->getStartLoc(), S->getEndLoc());
+	return RebuildDeclStmt(Decls, S->getBeginLoc(), S->getEndLoc());
       }
     }
     Decl *TransformDecl(SourceLocation Loc, Decl *D) {
@@ -1887,12 +1896,14 @@ namespace {
         // have been processed.  getTrivialTypeSourceInfo
         // is good enough for our purposes.
 	TypeSourceInfo * FTSI = FD->getTypeSourceInfo()? SemaRef.Context.getTrivialTypeSourceInfo(TransformType(FD->getType())) : 0;
-	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
+	//FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getLocStart(),
+	FunctionDecl *result = FunctionDecl::Create(SemaRef.Context, DC, FD->getBeginLoc(),
 				    FnName, TransformType(FD->getType()),
 				    FTSI,
 				    FD->isInlineSpecified()?SC_Static:FD->getStorageClass(),
 				    false, FD->hasWrittenPrototype(),
-				    FD->isConstexpr());
+                                    FD->getConstexprKind());
+				    //FD->isConstexpr());
 	transformedLocalDecl(D, result);
         copyAttrs(D, result);
 	// Copy the parameters
@@ -1907,7 +1918,8 @@ namespace {
 	  } else {
 	    PTSI = PTSI?TransformType(PTSI):0;
 	  }
-	  ParmVarDecl *Param = ParmVarDecl::Create(SemaRef.Context, result, OldParam->getLocStart(),
+	  //ParmVarDecl *Param = ParmVarDecl::Create(SemaRef.Context, result, OldParam->getLocStart(),
+	  ParmVarDecl *Param = ParmVarDecl::Create(SemaRef.Context, result, OldParam->getBeginLoc(),
 						   OldParam->getLocation(), OldParam->getIdentifier(),
 						   TransformType(OldParam->getType()),
 						   PTSI,
@@ -1929,7 +1941,8 @@ namespace {
 	    llvm::SmallVector<Stmt*, 8> Body;
 	    {
 	      std::vector<Expr*> args;
-	      Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args, UserBody->getLocStart()).get());
+	      //Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args, UserBody->getLocStart()).get());
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_BEGIN_FUNCTION, args, UserBody->getBeginLoc()).get());
 	    }
 	    // Insert all the temporary variables that we created
 	    for(std::vector<VarDecl*>::const_iterator iter = LocalTemps.begin(), end = LocalTemps.end(); iter != end; ++iter) {
@@ -1941,7 +1954,8 @@ namespace {
 	    Body.push_back(UserBody);
 	    {
 	      std::vector<Expr*> args;
-	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getLocEnd()).get());
+	      //Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getLocEnd()).get());
+	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getEndLoc()).get());
 	    }
 	    if(isMain)
 	      Body.push_back(SemaRef.BuildReturnStmt(SourceLocation(), CreateInteger(SemaRef.Context.IntTy, 0)).get());
@@ -1958,7 +1972,8 @@ namespace {
           if(VD->isStaticLocal()) {
             VarName = mangleStaticLocalName(VarName);
           }
-	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(),
+	  //VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getLocStart(),
+	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU, VD->getBeginLoc(),
 					    VD->getLocation(), VarName,
 					    VarType, SemaRef.Context.getTrivialTypeSourceInfo(VarType), VD->getStorageClass());
 	  transformedLocalDecl(D, result);
@@ -1989,7 +2004,8 @@ namespace {
             VarName = mangleStaticLocalName(VarName);
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, TU,
-                                            VD->getLocStart(),
+                                            //VD->getLocStart(),
+                                            VD->getBeginLoc(),
                                             VD->getLocation(),
                                             VarName, Ty,
                                             TyInfo,
@@ -2021,7 +2037,8 @@ namespace {
             NewDC = SemaRef.Context.getTranslationUnitDecl();
           }
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
-                                            VD->getLocStart(),
+                                            //VD->getLocStart(),
+                                            VD->getBeginLoc(),
                                             VD->getLocation(),
                                             VarName,
 					    Ty, TyInfo,
@@ -2051,7 +2068,8 @@ namespace {
           NewDC = SemaRef.Context.getTranslationUnitDecl();
         }
 	RecordDecl *Result = RecordDecl::Create(SemaRef.Context, RD->getTagKind(), NewDC,
-				  RD->getLocStart(), RD->getLocation(),
+				  //RD->getLocStart(), RD->getLocation(),
+				  RD->getBeginLoc(), RD->getLocation(),
 				  Name, cast_or_null<RecordDecl>(TransformDecl(SourceLocation(), RD->getPreviousDecl())));
 	transformedLocalDecl(D, Result);
         copyAttrs(D, Result);
@@ -2095,7 +2113,10 @@ namespace {
 	      Result->addDecl(TransformDecl(SourceLocation(), *iter));
 	    }
 	  }
-	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
+	  //SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), 0);
+          // Create an empty attribute list
+          ParsedAttributesView AttrList;
+	  SemaRef.ActOnFields(0, Result->getLocation(), Result, Fields, SourceLocation(), SourceLocation(), AttrList);
 	  SemaRef.ActOnTagFinishDefinition(&CurScope, Result, RD->getBraceRange());
 	}
         if(isa<FunctionDecl>(RD->getDeclContext())) {
@@ -2120,7 +2141,8 @@ namespace {
           Name = mangleLocalRecordName(Name);
           NewDC = SemaRef.Context.getTranslationUnitDecl();
         }
-	TypedefDecl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getLocStart(), TD->getLocation(), Name, Ty);
+	//TypedefDecl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getLocStart(), TD->getLocation(), Name, Ty);
+	TypedefDecl *Result = TypedefDecl::Create(SemaRef.Context, NewDC, TD->getBeginLoc(), TD->getLocation(), Name, Ty);
         copyAttrs(D, Result);
         if(TD->isModed()) {
           Result->setModedTypeSourceInfo(Ty, TransformType(TD->getUnderlyingType()));
@@ -2140,7 +2162,8 @@ namespace {
 	  PrevDecl = cast<EnumDecl>(TransformDecl(SourceLocation(), OrigPrevDecl));
 	}
 
-	EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getLocStart(), ED->getLocation(),
+	//EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getLocStart(), ED->getLocation(),
+	EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getBeginLoc(), ED->getLocation(),
 					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
 					    ED->isScopedUsingClassTag(), ED->isFixed());
 	transformedLocalDecl(D, Result);
@@ -2169,14 +2192,18 @@ namespace {
 
 	  }
 
-	  SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, nullptr);
+          // Create an empty attribute list
+          ParsedAttributesView AttrList;
+	  //SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, nullptr);
+	  SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, AttrList);
 	}
 
 	return Result;
       } else if(LabelDecl *LD = dyn_cast<LabelDecl>(D)) {
 	LabelDecl *Result;
 	if(LD->isGnuLocal()) {
-	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier(), LD->getLocStart());
+	  //Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier(), LD->getLocStart());
+	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier(), LD->getBeginLoc());
 	} else {
 	  Result = LabelDecl::Create(SemaRef.Context, DC, LD->getLocation(), LD->getIdentifier());
 	}
@@ -2215,7 +2242,12 @@ namespace {
 	  const char * start = llvm::sys::path::filename(Parent).begin();
 	  StringRef TestFile = StringRef(start, iter->end() - start);
 	  const DirectoryLookup *CurDir = NULL;
-	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(), true, NULL, CurDir, llvm::None, NULL, NULL, NULL, NULL);
+          bool IsMapped = false;
+          bool IsFrameworkFound = false;
+	  const FileEntry *found = SemaRef.PP.getHeaderSearchInfo().LookupFile(TestFile, SourceLocation(),
+                                                                               true, NULL, CurDir, llvm::None,
+                                                                               NULL, NULL, NULL, NULL,
+                                                                               &IsMapped,&IsFrameworkFound);
 	  if(found) {
 	    if(found == SemaRef.SourceMgr.getFileManager().getFile(*iter)) {
 	      relativeFilePath = TestFile;
@@ -2336,7 +2368,8 @@ namespace {
 	    iter != end; ++iter) {
 	  std::vector<Expr*> args;
 	  bool Phaseless = (iter->first->getType() == Decls->upcr_pshared_ptr_t);
-	  args.push_back(SemaRef.BuildDeclRefExpr(iter->first, iter->first->getType(), VK_LValue, SourceLocation()).get());
+	  //args.push_back(SemaRef.BuildDeclRefExpr(iter->first, iter->first->getType(), VK_LValue, SourceLocation()).get());
+	  args.push_back(dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(iter->first, iter->first->getType(), VK_LValue, SourceLocation())));
 	  uint32_t LayoutQualifier = iter->second->getType().getQualifiers().getLayoutQualifier();
 	  llvm::APInt ArrayDimension(SizeTypeSize, 1);
 	  bool hasThread = false;
@@ -2393,13 +2426,15 @@ namespace {
 	}
 	if(!Initializers.empty()) {
 	  std::vector<Expr*> args;
-	  args.push_back(SemaRef.BuildDeclRefExpr(_bupc_info, _bupc_info_type, VK_LValue, SourceLocation()).get());
+	  //args.push_back(SemaRef.BuildDeclRefExpr(_bupc_info, _bupc_info_type, VK_LValue, SourceLocation()).get());
+	  args.push_back(dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(_bupc_info, _bupc_info_type, VK_LValue, SourceLocation())));
 	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, Initializers.size()), SemaRef.Context.getSizeType(), SourceLocation()));
 	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_shalloc, args).get());
 	}
 	if(!PInitializers.empty()) {
 	  std::vector<Expr*> args;
-	  args.push_back(SemaRef.BuildDeclRefExpr(_bupc_pinfo, _bupc_pinfo_type, VK_LValue, SourceLocation()).get());
+	  //args.push_back(SemaRef.BuildDeclRefExpr(_bupc_pinfo, _bupc_pinfo_type, VK_LValue, SourceLocation()).get());
+	  args.push_back(dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(_bupc_pinfo, _bupc_pinfo_type, VK_LValue, SourceLocation())));
 	  args.push_back(IntegerLiteral::Create(SemaRef.Context, llvm::APInt(SizeTypeSize, PInitializers.size()), SemaRef.Context.getSizeType(), SourceLocation()));
 	  Statements.push_back(BuildUPCRCall(Decls->upcr_startup_pshalloc, args).get());
 	}
@@ -2618,7 +2653,8 @@ int main(int argc, const char ** argv) {
 
   // Write the arguments to a vector
   ArgStringList NewOptions;
-  for(ArgList::const_iterator iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
+  //for(ArgList::const_iterator iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
+  for(auto iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
     // Always parse as UPC
     if((*iter)->getOption().getID() == options::OPT_INPUT &&
        iter != Args.begin()) {
