@@ -5,7 +5,7 @@ set(LLVM_LINK_COMPONENTS
 
 add_clang_executable(clang-upc2c Transform.cpp)
 
-target_link_libraries(clang-upc2c
+target_link_libraries(clang-upc2c PRIVATE
   clangTooling clangBasic)
 
 install(TARGETS clang-upc2c
