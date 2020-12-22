@@ -1266,8 +1266,6 @@ namespace {
 	QualType PtrType = Phaseless? Decls->upcr_pshared_ptr_t : Decls->upcr_shared_ptr_t;
 	VarDecl * TmpPtrDecl = CreateTmpVar(PtrType);
 	BinaryOperatorKind Opc = BinaryOperator::getOpForCompoundAssignment(E->getOpcode());
-	//Expr * TmpPtr = SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()).get();
-	//Expr * TmpPtr = dynamic_cast<Expr *>(SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()));
 	Expr * TmpPtr = dyn_cast<Expr>(SemaRef.BuildDeclRefExpr(TmpPtrDecl, PtrType, VK_LValue, SourceLocation()));
 	Expr * SaveLHS = SemaRef.CreateBuiltinBinOp(SourceLocation(), BO_Assign, TmpPtr, BuildParens(TransformExpr(E->getLHS()).get()).get()).get();
 	Expr * RHS = BuildParens(TransformExpr(E->getRHS()).get()).get();
@@ -1787,7 +1785,7 @@ namespace {
         NewDI = getDerived().TransformType(OldDI);
       if (!NewDI)
         return nullptr;
-      
+
       if (NewDI == OldDI && indexAdjustment == 0)
         return OldParm;
 
@@ -1836,10 +1834,20 @@ namespace {
     }
     QualType MakeTypedefForAnonRecord(QualType RealType) {
       QualType Element = SemaRef.Context.getBaseElementType(RealType);
+      RecordDecl *RD = nullptr;
+
       if(const ElaboratedType * ET = dyn_cast<ElaboratedType>(Element)) {
         Element = ET->getNamedType();
+        RD = ET->getAsRecordDecl();
       }
       if(TypedefDecl *NewTypedef = MakeTypedefForAnonRecordImpl(Element)) {
+        // We set the original anonymous struct definition to the canonical decl and name
+        // This allows the typedefs to correctly refer back to the original struct
+        // and removes any explicit anonymity
+        if( RD ){
+          RD->setDeclName(NewTypedef->getCanonicalDecl()->getDeclName());
+        }
+
         SubstituteType Sub(SemaRef, Element, SemaRef.Context.getTypedefType(NewTypedef));
         RealType = Sub.TransformType(RealType);
       }
@@ -1948,7 +1956,6 @@ namespace {
 	    Body.push_back(UserBody);
 	    {
 	      std::vector<Expr*> args;
-	      //Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getLocEnd()).get());
 	      Body.push_back(BuildUPCRCall(Decls->UPCR_EXIT_FUNCTION, args, UserBody->getEndLoc()).get());
 	    }
 	    if(isMain)
@@ -2030,6 +2037,7 @@ namespace {
             }
             NewDC = SemaRef.Context.getTranslationUnitDecl();
           }
+
 	  VarDecl *result = VarDecl::Create(SemaRef.Context, NewDC,
                                             VD->getBeginLoc(),
                                             VD->getLocation(),
@@ -2068,6 +2076,7 @@ namespace {
           Result->setTypedefNameForAnonDecl(TDND);
           Result->setDeclName(TDND->getDeclName());
         }
+
 	transformedLocalDecl(D, Result);
         copyAttrs(D, Result);
 	SmallVector<Decl *, 4> Fields;
@@ -2076,11 +2085,34 @@ namespace {
           Scope CurScope(SemaRef.getCurScope(), Scope::ClassScope|Scope::DeclScope, SemaRef.getDiagnostics());
           clang::Sema::ContextRAII SaveCtx(SemaRef, NewDC);
 	  SemaRef.ActOnTagStartDefinition(&CurScope, Result);
+          Decl *StructDecl = nullptr;
 	  for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
 	    if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
+
+              QualType Element = SemaRef.Context.getBaseElementType(FD->getType());
 	      TypeSourceInfo *DI = FD->getTypeSourceInfo();
 	      if(DI) DI = TransformType(DI);
-	      FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(), TransformType(FD->getType()), DI, Result, FD->getLocation(), FD->isMutable(), TransformExpr(FD->getBitWidth()).get(), FD->getInClassInitStyle(), FD->getInnerLocStart(), FD->getAccess(), 0);
+
+	      FieldDecl *NewFD = SemaRef.CheckFieldDecl(FD->getDeclName(),
+                                                        TransformType(FD->getType()),
+                                                        DI,
+                                                        Result,
+                                                        FD->getLocation(),
+                                                        FD->isMutable(),
+                                                        TransformExpr(FD->getBitWidth()).get(),
+                                                        FD->getInClassInitStyle(),
+                                                        FD->getInnerLocStart(),
+                                                        FD->getAccess(), 0);
+              // check to see whether our current struct variable is an elaborated type (struct,union)
+              // if it is, retrieve the StructDecl and set its DeclName
+              if(const ElaboratedType * NET = dyn_cast<ElaboratedType>(SemaRef.Context.getBaseElementType(NewFD->getType()))) {
+                if( StructDecl ){
+                  RecordDecl *MyDecl = dyn_cast<RecordDecl>(StructDecl);
+                  if( MyDecl )
+                    MyDecl->setDeclName(FD->getDeclName());
+                }
+              }
+
 	      transformedLocalDecl(FD, NewFD);
               copyAttrs(FD, NewFD);
 	      NewFD->setImplicit(FD->isImplicit());
@@ -2104,10 +2136,20 @@ namespace {
 	      // be translated into struct { struct A; upc_pshared_ptr_t ptr; };
 	      // These extra declarations are harmless elsewhere, but they
 	      // cause warnings inside structs.
-	      if(TagDecl *TD = dyn_cast<TagDecl>(*iter))
-		if(!TD->isThisDeclarationADefinition())
+              RecordDecl *TRD = nullptr;
+	      if(TagDecl *TD = dyn_cast<TagDecl>(*iter)){
+		if(!TD->isThisDeclarationADefinition()){
 		  continue;
-	      Result->addDecl(TransformDecl(SourceLocation(), *iter));
+                }else if(!TD->isFreeStanding()){
+                  TRD = dyn_cast<RecordDecl>(*iter);
+                }
+              }
+              if( TRD ){
+                StructDecl = TransformDecl(SourceLocation(), *iter);
+                Result->addDecl(StructDecl);
+              }else{
+	        Result->addDecl(TransformDecl(SourceLocation(), *iter));
+              }
 	    }
 	  }
           // Create an empty attribute list
@@ -2153,6 +2195,7 @@ namespace {
           return Result;
         }
       } else if(EnumDecl *ED = dyn_cast<EnumDecl>(D)) {
+        TypedefNameDecl *TDND = ED->getTypedefNameForAnonDecl();
 	EnumDecl * PrevDecl = 0;
 	if(EnumDecl * OrigPrevDecl = ED->getPreviousDecl()) {
 	  PrevDecl = cast<EnumDecl>(TransformDecl(SourceLocation(), OrigPrevDecl));
@@ -2161,11 +2204,14 @@ namespace {
 	EnumDecl *Result = EnumDecl::Create(SemaRef.Context, DC, ED->getBeginLoc(), ED->getLocation(),
 					    ED->getIdentifier(), PrevDecl, ED->isScoped(),
 					    ED->isScopedUsingClassTag(), ED->isFixed());
+        if(TDND){
+          Result->setTypedefNameForAnonDecl(TDND);
+          Result->setDeclName(TDND->getDeclName());
+        }
 	transformedLocalDecl(D, Result);
         copyAttrs(D, Result);
 
 	if(ED->isThisDeclarationADefinition()) {
-
 	  Result->startDefinition();
 
 	  SmallVector<Decl *, 4> Enumerators;
@@ -2656,7 +2702,7 @@ int main(int argc, const char ** argv) {
 
   // Write the arguments to a vector
   ArgStringList NewOptions;
-  //for(ArgList::const_iterator iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
+
   for(auto iter = Args.begin(), end = Args.end(); iter != end; ++iter) {
     // Always parse as UPC
     if((*iter)->getOption().getID() == options::OPT_INPUT &&
