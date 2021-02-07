@@ -2085,11 +2085,9 @@ namespace {
           Scope CurScope(SemaRef.getCurScope(), Scope::ClassScope|Scope::DeclScope, SemaRef.getDiagnostics());
           clang::Sema::ContextRAII SaveCtx(SemaRef, NewDC);
 	  SemaRef.ActOnTagStartDefinition(&CurScope, Result);
-          Decl *StructDecl = nullptr;
 	  for(RecordDecl::decl_iterator iter = RD->decls_begin(), end = RD->decls_end(); iter != end; ++iter) {
 	    if(FieldDecl *FD = dyn_cast_or_null<FieldDecl>(*iter)) {
 
-              QualType Element = SemaRef.Context.getBaseElementType(FD->getType());
 	      TypeSourceInfo *DI = FD->getTypeSourceInfo();
 	      if(DI) DI = TransformType(DI);
 
@@ -2103,15 +2101,6 @@ namespace {
                                                         FD->getInClassInitStyle(),
                                                         FD->getInnerLocStart(),
                                                         FD->getAccess(), 0);
-              // check to see whether our current struct variable is an elaborated type (struct,union)
-              // if it is, retrieve the StructDecl and set its DeclName
-              if(const ElaboratedType * NET = dyn_cast<ElaboratedType>(SemaRef.Context.getBaseElementType(NewFD->getType()))) {
-                if( StructDecl ){
-                  RecordDecl *MyDecl = dyn_cast<RecordDecl>(StructDecl);
-                  if( MyDecl )
-                    MyDecl->setDeclName(FD->getDeclName());
-                }
-              }
 
 	      transformedLocalDecl(FD, NewFD);
               copyAttrs(FD, NewFD);
@@ -2136,20 +2125,10 @@ namespace {
 	      // be translated into struct { struct A; upc_pshared_ptr_t ptr; };
 	      // These extra declarations are harmless elsewhere, but they
 	      // cause warnings inside structs.
-              RecordDecl *TRD = nullptr;
-	      if(TagDecl *TD = dyn_cast<TagDecl>(*iter)){
-		if(!TD->isThisDeclarationADefinition()){
+              if(TagDecl *TD = dyn_cast<TagDecl>(*iter))
+		if(!TD->isThisDeclarationADefinition())
 		  continue;
-                }else if(!TD->isFreeStanding()){
-                  TRD = dyn_cast<RecordDecl>(*iter);
-                }
-              }
-              if( TRD ){
-                StructDecl = TransformDecl(SourceLocation(), *iter);
-                Result->addDecl(StructDecl);
-              }else{
-	        Result->addDecl(TransformDecl(SourceLocation(), *iter));
-              }
+	      Result->addDecl(TransformDecl(SourceLocation(), *iter));
 	    }
 	  }
           // Create an empty attribute list
@@ -2235,7 +2214,6 @@ namespace {
 
           // Create an empty attribute list
           ParsedAttributesView AttrList;
-	  //SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, nullptr);
 	  SemaRef.ActOnEnumBody(Result->getLocation(), Result->getBraceRange(), Result, Enumerators, nullptr, AttrList);
 	}
 
